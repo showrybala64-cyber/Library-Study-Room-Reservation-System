@@ -18,7 +18,6 @@ LIGHT  = "#F5F5F5"
 
 RULE_COLS = ("ID", "Effective From", "Max(min)", "Grace(min)",
              "Cancel(min)", "No-Show Pts", "Late Cancel Pts", "Active")
-VIO_COLS  = ("Vio ID", "Student ID", "Room", "Type", "Pts", "Status", "Date")
 
 
 class ManageRulesViolations(tk.Frame):
@@ -37,9 +36,8 @@ class ManageRulesViolations(tk.Frame):
         content.grid(row=0, column=0, sticky="nsew", padx=24, pady=16)
         content.columnconfigure(0, weight=1)
         content.rowconfigure(4, weight=1)
-        content.rowconfigure(7, weight=1)
 
-        tk.Label(content, text="Manage Rules & Violations",
+        tk.Label(content, text="Manage Rules",
                  fg=MAROON, bg=WHITE, font=("Poppins", 22, "bold")
                  ).grid(row=0, column=0, sticky="w", pady=(0, 6))
 
@@ -121,54 +119,12 @@ class ManageRulesViolations(tk.Frame):
         vsb1.grid(row=0, column=1, sticky="ns")
         hsb1.grid(row=1, column=0, sticky="ew")
 
-        # ── Violations Section ────────────────────────────────────────
-        tk.Label(content, text="Violation Records",
-                 fg=MAROON, bg=WHITE, font=("Poppins", 15, "bold")
-                 ).grid(row=5, column=0, sticky="w", pady=(0, 4))
-
-        vio_btn_row = tk.Frame(content, bg=WHITE)
-        vio_btn_row.grid(row=6, column=0, sticky="w", pady=(0, 6))
-        tk.Button(vio_btn_row, text="Edit Violation",
-                  fg=WHITE, bg=MAROON,
-                  font=("Poppins", 12, "bold"),
-                  relief="flat", bd=0, padx=14, pady=6, cursor="hand2",
-                  command=self._edit_violation
-                  ).pack(side="left")
-
-        vio_frame = tk.Frame(content, bg=WHITE)
-        vio_frame.grid(row=7, column=0, sticky="nsew")
-        vio_frame.columnconfigure(0, weight=1)
-        vio_frame.rowconfigure(0, weight=1)
-
-        vio_border = tk.Frame(vio_frame,
-                              highlightbackground=MAROON, highlightthickness=2)
-        vio_border.grid(row=0, column=0, sticky="nsew")
-        vio_border.columnconfigure(0, weight=1)
-        vio_border.rowconfigure(0, weight=1)
-
-        self.vio_tree = ttk.Treeview(vio_border, columns=VIO_COLS,
-                                     show="headings", selectmode="browse", height=6,
-                                     style="Rules.Treeview")
-        self.vio_tree.tag_configure("evenrow", background="#FFFFFF")
-        self.vio_tree.tag_configure("oddrow",  background="#FFF8E7")
-        for col in VIO_COLS:
-            self.vio_tree.heading(col, text=col)
-            self.vio_tree.column(col, width=110, anchor="center")
-        vsb2 = ttk.Scrollbar(vio_border, orient="vertical", command=self.vio_tree.yview)
-        hsb2 = ttk.Scrollbar(vio_border, orient="horizontal", command=self.vio_tree.xview)
-        self.vio_tree.configure(yscrollcommand=vsb2.set, xscrollcommand=hsb2.set)
-        self.vio_tree.grid(row=0, column=0, sticky="nsew")
-        vsb2.grid(row=0, column=1, sticky="ns")
-        hsb2.grid(row=1, column=0, sticky="ew")
-
         self._load_data()
 
     # ------------------------------------------------------------------
     def _load_data(self):
         for r in self.rule_tree.get_children():
             self.rule_tree.delete(r)
-        for r in self.vio_tree.get_children():
-            self.vio_tree.delete(r)
 
         try:
             rules = execute_query(
@@ -192,22 +148,13 @@ class ManageRulesViolations(tk.Frame):
                 ), tags=(tag,))
 
             vios = execute_query(
-                """SELECT v.violation_id, v.user_id, rm.room_number,
-                          v.violation_type, v.points_assessed, v.status,
-                          DATE(v.created_at)
-                   FROM Violations v
-                   JOIN Reservations res ON v.reservation_id = res.reservation_id
-                   JOIN Rooms rm         ON res.room_id = rm.room_id
-                   ORDER BY v.created_at DESC""",
+                "SELECT violation_id, status FROM Violations",
                 fetch=True
             )
-            for i, r in enumerate(vios):
-                tag = "evenrow" if i % 2 == 0 else "oddrow"
-                self.vio_tree.insert("", "end", values=list(r.values()), tags=(tag,))
 
             self._stat_lbls["Total Rules"].config(text=str(len(rules)))
             self._stat_lbls["Total Violations"].config(text=str(len(vios)))
-            active_v = sum(1 for r in vios if r["status"] == "open")
+            active_v = sum(1 for r in vios if r["status"] == "active")
             self._stat_lbls["Active Violations"].config(text=str(active_v))
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
@@ -497,44 +444,3 @@ class ManageRulesViolations(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
-    # ------------------------------------------------------------------
-    def _edit_violation(self):
-        sel = self.vio_tree.selection()
-        if not sel:
-            messagebox.showwarning("Edit", "Select a violation first.")
-            return
-        vio_id  = self.vio_tree.item(sel[0])["values"][0]
-        cur_st  = self.vio_tree.item(sel[0])["values"][5]
-
-        win = tk.Toplevel(self)
-        win.title("Edit Violation")
-        win.geometry("340x190")
-        win.configure(bg=WHITE)
-        win.grab_set()
-
-        tk.Label(win, text=f"Edit Violation #{vio_id}", fg=MAROON, bg=WHITE,
-                 font=("Poppins", 15, "bold")).pack(pady=(16, 8))
-        tk.Label(win, text="Status:", fg=BLACK, bg=WHITE,
-                 font=("Poppins", 12)).pack(anchor="w", padx=30)
-        st_var = tk.StringVar(value=cur_st)
-        ttk.Combobox(win, textvariable=st_var,
-                     values=["open", "resolved", "appealed"],
-                     state="readonly", width=20,
-                     font=("Poppins", 12)
-                     ).pack(anchor="w", padx=30, pady=(2, 10))
-
-        def save():
-            try:
-                execute_query(
-                    "UPDATE Violations SET status = %s WHERE violation_id = %s",
-                    (st_var.get(), vio_id)
-                )
-                win.destroy()
-                self._load_data()
-            except Exception as exc:
-                messagebox.showerror("Database Error", str(exc), parent=win)
-
-        tk.Button(win, text="SAVE", fg=WHITE, bg=MAROON,
-                  font=("Poppins", 13, "bold"),
-                  relief="flat", bd=0, padx=24, pady=8, cursor="hand2",
-                  command=save).pack()

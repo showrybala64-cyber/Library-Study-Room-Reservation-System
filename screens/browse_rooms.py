@@ -3,13 +3,10 @@ from tkinter import messagebox, ttk
 import customtkinter as ctk
 from datetime import date, datetime, timedelta
 import os
+import pytz
 from connect_db import execute_query
 
-try:
-    from tkcalendar import DateEntry as _DateEntry
-    _TKCAL = True
-except ImportError:
-    _TKCAL = False
+from components.date_picker import make_date_entry
 
 MAROON = "#5E1219"
 GOLD   = "#EFBF04"
@@ -188,46 +185,10 @@ class BrowseRooms(tk.Frame):
                  font=("Poppins", 12, "bold")
                  ).grid(row=1, column=0, sticky="w", pady=row_pady)
 
-        date_wrap = tk.Frame(f, bg=WHITE)
-        date_wrap.grid(row=1, column=1, sticky="w", padx=(14, 0), pady=row_pady)
         today = date.today()
-
-        if _TKCAL:
-            self._date_widget = _DateEntry(
-                date_wrap,
-                width=16,
-                background=MAROON,
-                foreground=WHITE,
-                borderwidth=1,
-                font=("Poppins", 12),
-                date_pattern="yyyy-mm-dd",
-                headersbackground=MAROON,
-                headersforeground=WHITE,
-                normalbackground=WHITE,
-                normalforeground=BLACK,
-                weekendbackground="#FFF0F0",
-                weekendforeground=MAROON,
-                othermonthforeground="#AAAAAA",
-                selectbackground=MAROON,
-                selectforeground=WHITE,
-                year=today.year,
-                month=today.month,
-                day=today.day,
-            )
-            self._date_widget.grid(row=0, column=0)
-        else:
-            self.date_var = tk.StringVar(value=today.strftime("%Y-%m-%d"))
-            self._date_widget = ctk.CTkEntry(
-                date_wrap, textvariable=self.date_var, width=160,
-                height=36, corner_radius=6,
-                border_color=MAROON, border_width=1,
-                fg_color=WHITE, text_color=BLACK,
-                font=("Poppins", 12)
-            )
-            self._date_widget.grid(row=0, column=0)
-            tk.Label(date_wrap, text="📅", bg=WHITE,
-                      font=("Arial", 16)
-                      ).grid(row=0, column=1, padx=(8, 0))
+        self._date_widget = make_date_entry(
+            f, default_date=today.strftime("%Y-%m-%d"), entry_width=160)
+        self._date_widget.grid(row=1, column=1, sticky="w", padx=(14, 0), pady=row_pady)
 
         # Start Time
         tk.Label(f, text="Start Time:", fg=BLACK, bg=WHITE,
@@ -310,7 +271,7 @@ class BrowseRooms(tk.Frame):
             messagebox.showwarning("Reserve", "Please select a room category first.")
             return
         room_str  = self.room_var.get()
-        date_str  = self._date_widget.get() if _TKCAL else self.date_var.get()
+        date_str  = self._date_widget.get()
         start_str = self.start_var.get()
         end_str   = self.end_var.get()
 
@@ -327,28 +288,136 @@ class BrowseRooms(tk.Frame):
             messagebox.showerror("Reserve", "End time must be after start time.")
             return
 
+        # 1. FUTURE DATE VALIDATION
         try:
-            rules = execute_query(
-                "SELECT max_booking_minutes FROM Rules "
-                "WHERE is_active = TRUE ORDER BY rule_set_id DESC LIMIT 1",
-                fetch=True
+            reservation_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            messagebox.showerror("Reserve", "Invalid date format. Use YYYY-MM-DD.")
+            return
+
+        today = date.today()
+        if reservation_date < today:
+            messagebox.showerror(
+                "Reserve",
+                "Reservation date must be today or a future date."
             )
-            if rules:
-                max_m = rules[0]["max_booking_minutes"]
-                fmt   = "%H:%M"
-                delta = datetime.strptime(end_str, fmt) - datetime.strptime(start_str, fmt)
-                if delta.seconds / 60 > max_m:
+            return
+
+        # 2. SAME-DAY BOOKING TIME VALIDATION
+        if reservation_date == today:
+            local_tz = pytz.timezone("America/Detroit")
+            now_est = datetime.now(local_tz)
+            current_time_str = now_est.strftime("%H:%M")
+            if start_str <= current_time_str:
+                messagebox.showerror(
+                    "Invalid Time",
+                    "Cannot book a room in the past. Please select a future time."
+                )
+                return
+
+        # 3. BOOKING DURATION VALIDATION
+        fmt      = "%H:%M"
+        start_dt = datetime.strptime(start_str, fmt)
+        end_dt   = datetime.strptime(end_str, fmt)
+        duration_minutes = (end_dt - start_dt).seconds // 60
+
+        if duration_minutes < 60:
+            messagebox.showerror(
+                "Invalid Duration",
+                "Minimum booking duration is 1 hour (60 minutes)."
+            )
+            return
+
+        if duration_minutes > 120:
+            messagebox.showerror(
+                "Invalid Duration",
+                "Maximum booking duration is 2 hours (120 minutes)."
+            )
+            return
+
+        uid = self.user_info["user_id"]
+
+        try:
+            # 4. DAILY 3-HOUR LIMIT
+            daily = execute_query(
+                "SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, start_time, end_time)), 0) AS total "
+                "FROM Reservations "
+                "WHERE user_id = %s AND reservation_date = %s "
+                "AND status IN ('reserved', 'checked_in', 'completed')",
+                (uid, date_str), fetch=True
+            )
+            total_booked = int(daily[0]["total"]) if daily else 0
+            if total_booked + duration_minutes > 180:
+                remaining = 180 - total_booked
+                messagebox.showerror(
+                    "Daily Limit Exceeded",
+                    f"You have already booked {total_booked} min today.\n"
+                    f"Only {remaining} min remaining (daily limit: 3 hours)."
+                )
+                return
+
+            # 5. OVERLAPPING RESERVATION CHECK
+            overlap = execute_query(
+                "SELECT COUNT(*) AS cnt FROM Reservations "
+                "WHERE user_id = %s AND reservation_date = %s "
+                "AND status IN ('reserved', 'checked_in') "
+                "AND NOT (end_time <= %s OR start_time >= %s)",
+                (uid, date_str, start_str, end_str), fetch=True
+            )
+            if overlap and int(overlap[0]["cnt"]) > 0:
+                messagebox.showerror(
+                    "Overlapping Reservation",
+                    "You cannot book two rooms at the same time.\n"
+                    "Please choose a different time slot."
+                )
+                return
+
+            # 6. 2-HOUR COOLDOWN AFTER CHECK-IN
+            cooldown = execute_query(
+                "SELECT r.end_time FROM Reservations r "
+                "JOIN Check_Ins c ON c.reservation_id = r.reservation_id "
+                "WHERE r.user_id = %s AND r.reservation_date = CURDATE() "
+                "ORDER BY r.end_time DESC LIMIT 1",
+                (uid,), fetch=True
+            )
+            if cooldown:
+                last_end = cooldown[0]["end_time"]
+                # end_time from DB is a timedelta; convert to datetime for comparison
+                if hasattr(last_end, "seconds"):
+                    last_end_dt = datetime.combine(
+                        date.today(),
+                        (datetime.min + last_end).time()
+                    )
+                else:
+                    last_end_dt = datetime.combine(date.today(), last_end)
+                cooldown_until = last_end_dt + timedelta(hours=2)
+                now = datetime.now()
+                if now < cooldown_until:
+                    wait_min = int((cooldown_until - now).total_seconds() // 60)
                     messagebox.showerror(
-                        "Reserve",
-                        f"Reservations cannot exceed {max_m} minute(s) per the library rules."
+                        "Cooldown Period",
+                        f"A 2-hour cooldown is required after check-in.\n"
+                        f"You can book again in {wait_min} minute(s)."
                     )
                     return
 
+            # 7. FETCH ACTIVE RULE SET
+            rule_result = execute_query(
+                "SELECT rule_set_id FROM Rules WHERE is_active = 1 "
+                "ORDER BY rule_set_id DESC LIMIT 1",
+                fetch=True
+            )
+            if not rule_result:
+                messagebox.showerror("Error", "No active rule set found.")
+                return
+            rule_set_id = rule_result[0]["rule_set_id"]
+
+            # 8. INSERT RESERVATION
             execute_query(
                 """INSERT INTO Reservations
-                   (user_id, room_id, reservation_date, start_time, end_time, status)
-                   VALUES (%s, %s, %s, %s, %s, 'pending')""",
-                (self.user_info["user_id"], room_id, date_str, start_str, end_str)
+                   (user_id, room_id, reservation_date, start_time, end_time, status, rule_set_id)
+                   VALUES (%s, %s, %s, %s, %s, 'reserved', %s)""",
+                (uid, room_id, date_str, start_str, end_str, rule_set_id)
             )
             messagebox.showinfo("Reserved", "Reservation created successfully!")
         except Exception as exc:

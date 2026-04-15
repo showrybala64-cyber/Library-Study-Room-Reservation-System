@@ -149,7 +149,7 @@ class Reservations(tk.Frame):
                 messagebox.showerror("Check-In", "Reservation not found.")
                 return
             r = res[0]
-            if r["status"] not in ("pending", "confirmed"):
+            if r["status"] != "reserved":
                 messagebox.showerror("Check-In", f"Cannot check in: status is '{r['status']}'.")
                 return
 
@@ -196,7 +196,7 @@ class Reservations(tk.Frame):
                 messagebox.showerror("Cancel", "Reservation not found.")
                 return
             r = res[0]
-            if r["status"] not in ("pending", "confirmed"):
+            if r["status"] != "reserved":
                 messagebox.showerror("Cancel", f"Cannot cancel: status is '{r['status']}'.")
                 return
 
@@ -226,8 +226,9 @@ class Reservations(tk.Frame):
                 messagebox.showinfo("Cancelled", "Reservation cancelled without penalty.")
 
             execute_query(
-                "UPDATE Reservations SET status = 'cancelled' WHERE reservation_id = %s",
-                (res_id,)
+                "UPDATE Reservations SET status = 'cancelled', canceled_at = NOW(), "
+                "canceled_by_user_id = %s WHERE reservation_id = %s",
+                (self.user_info["user_id"], res_id)
             )
             self._load_data()
         except Exception as exc:

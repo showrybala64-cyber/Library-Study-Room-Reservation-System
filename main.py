@@ -3,8 +3,6 @@ from tkinter import messagebox
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import os
-import threading
-import time
 import webbrowser
 from datetime import datetime
 import credentials
@@ -51,7 +49,7 @@ ADMIN_NAV = [
     ("Violations",               "check_violations"),
     ("Generate Reports",         "reports"),
     ("Manage Rooms",             "manage_rooms"),
-    ("Manage Rules & Violations","manage_rules_violations"),
+    ("Manage Rules","manage_rules_violations"),
 ]
 
 # ── Screen routing table ───────────────────────────────────────────────
@@ -65,7 +63,7 @@ SCREEN_MAP = {
     "check_violations":        (CheckViolations,        "Violations"),
     "reports":                 (Reports,                "Generate Reports"),
     "manage_rooms":            (ManageRooms,            "Manage Rooms"),
-    "manage_rules_violations": (ManageRulesViolations,  "Manage Rules & Violations"),
+    "manage_rules_violations": (ManageRulesViolations,  "Manage Rules"),
 }
 
 
@@ -97,7 +95,6 @@ class App(ctk.CTk):
 
         self._build_auth_container()
         self._show_login()
-        self._start_background_monitor()
 
     # ------------------------------------------------------------------
     # Persistent auth container (built once, never destroyed)
@@ -241,7 +238,7 @@ class App(ctk.CTk):
         RADIUS  = 8
         BW      = 3
         D_BDR   = "#3D0A0F"
-        LABEL_MAP = {"Manage Rules & Violations": "Manage Rules &\nViolations"}
+        LABEL_MAP = {}
 
         nav_frame = tk.Frame(sidebar, bg=GOLD)
         nav_frame.pack(fill="x", padx=10, pady=(16, 0))
@@ -401,72 +398,72 @@ class App(ctk.CTk):
             self._show_app_screen(ManagerDashboard, "Dashboard")
         else:
             self._show_app_screen(StudentDashboard, "Dashboard")
+        self._start_noshow_checker()
 
     # ------------------------------------------------------------------
-    # Background monitor – checks for no-show violations every 5 minutes
+    # No-show checker – runs immediately after login, then every 5 min
     # ------------------------------------------------------------------
-    def _start_background_monitor(self):
-        t = threading.Thread(target=self._monitor_loop, daemon=True)
-        t.start()
-
-    def _monitor_loop(self):
-        while True:
-            try:
-                self._check_noshows()
-            except Exception as e:
-                print(f"[Monitor] Error: {e}")
-            time.sleep(300)
+    def _start_noshow_checker(self):
+        """Trigger first run immediately; after() keeps it on the main thread."""
+        self._check_noshows()
 
     def _check_noshows(self):
-        rules = execute_query(
-            "SELECT checkin_grace_minutes, points_no_show, suspension_threshold_points "
-            "FROM Rules WHERE is_active = TRUE ORDER BY rule_set_id DESC LIMIT 1",
-            fetch=True
-        )
-        if not rules:
-            return
-        grace     = rules[0]["checkin_grace_minutes"] or 15
-        pts       = rules[0]["points_no_show"] or 10
-        threshold = rules[0]["suspension_threshold_points"] or 30
+        try:
+            rows = execute_query(
+                """SELECT r.reservation_id, r.user_id, r.room_id,
+                          ru.points_no_show, ru.suspension_threshold_points,
+                          ru.suspension_duration_days
+                   FROM Reservations r
+                   JOIN Rules ru ON ru.is_active = 1
+                   LEFT JOIN Check_Ins c ON c.reservation_id = r.reservation_id
+                   WHERE r.status = 'reserved'
+                     AND r.reservation_date = CURDATE()
+                     AND ADDTIME(r.start_time,
+                             SEC_TO_TIME(ru.checkin_grace_minutes * 60)) < CURTIME()
+                     AND c.checkin_id IS NULL""",
+                fetch=True
+            )
+            for row in rows:
+                res_id    = row["reservation_id"]
+                user_id   = row["user_id"]
+                pts       = row["points_no_show"] or 10
+                threshold = row["suspension_threshold_points"] or 30
+                susp_days = row["suspension_duration_days"] or 7
 
-        rows = execute_query(
-            """SELECT r.reservation_id, r.user_id,
-                      TIMESTAMP(r.reservation_date, r.start_time) AS start_dt
-               FROM Reservations r
-               LEFT JOIN Check_Ins ci ON r.reservation_id = ci.reservation_id
-               WHERE r.status IN ('pending', 'confirmed')
-                 AND ci.checkin_id IS NULL
-                 AND TIMESTAMP(r.reservation_date, r.start_time) < DATE_SUB(NOW(), INTERVAL %s MINUTE)""",
-            (grace,), fetch=True
-        )
-
-        for row in rows:
-            res_id  = row["reservation_id"]
-            user_id = row["user_id"]
-            execute_query(
-                "UPDATE Reservations SET status = 'no_show' WHERE reservation_id = %s",
-                (res_id,)
-            )
-            execute_query(
-                """INSERT INTO Violations (user_id, reservation_id, violation_type,
-                                           points_assessed, status)
-                   VALUES (%s, %s, 'no_show', %s, 'open')""",
-                (user_id, res_id, pts)
-            )
-            execute_query(
-                "UPDATE Users SET penalty_points = penalty_points + %s WHERE user_id = %s",
-                (pts, user_id)
-            )
-            result = execute_query(
-                "SELECT penalty_points FROM Users WHERE user_id = %s",
-                (user_id,), fetch=True
-            )
-            if result and result[0]["penalty_points"] >= threshold:
                 execute_query(
-                    "UPDATE Users SET account_status = 'suspended' WHERE user_id = %s",
-                    (user_id,)
+                    "UPDATE Reservations SET status = 'no_show' "
+                    "WHERE reservation_id = %s",
+                    (res_id,)
                 )
-                print(f"[Monitor] User {user_id} suspended (threshold reached).")
+                execute_query(
+                    """INSERT INTO Violations
+                       (user_id, reservation_id, violation_type,
+                        points_assessed, status, notes, created_at)
+                       VALUES (%s, %s, 'no_show', %s, 'active',
+                       'Automatic no-show: student did not check in within grace period',
+                       NOW())""",
+                    (user_id, res_id, pts)
+                )
+                execute_query(
+                    "UPDATE Users SET penalty_points = penalty_points + %s "
+                    "WHERE user_id = %s",
+                    (pts, user_id)
+                )
+                result = execute_query(
+                    "SELECT penalty_points FROM Users WHERE user_id = %s",
+                    (user_id,), fetch=True
+                )
+                if result and result[0]["penalty_points"] >= threshold:
+                    execute_query(
+                        """UPDATE Users SET account_status = 'suspended',
+                           suspended_until = DATE_ADD(NOW(), INTERVAL %s DAY)
+                           WHERE user_id = %s""",
+                        (susp_days, user_id)
+                    )
+        except Exception as e:
+            print(f"[NoShow Checker] Error: {e}")
+        finally:
+            self.after(300_000, self._check_noshows)
 
 
 # ══════════════════════════════════════════════════════════════════════

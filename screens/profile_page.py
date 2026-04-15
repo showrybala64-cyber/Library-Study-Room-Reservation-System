@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
-from tkcalendar import Calendar
+from components.date_picker import make_date_entry
 from connect_db import execute_query
 
 MAROON = "#5E1219"
@@ -72,66 +72,11 @@ class ProfilePage(tk.Frame):
                      fg=BLACK, bg=WHITE, font=("Poppins", 12, "bold")
                      ).grid(row=idx, column=0, sticky="w", pady=5)
             if key == "dob":
-                self.dob_var = tk.StringVar(value=value)
-                self.dob_entry = ctk.CTkEntry(pi_frame, textvariable=self.dob_var,
-                                              corner_radius=8, border_width=2,
-                                              border_color=MAROON, height=38,
-                                              fg_color=WHITE, text_color=BLACK,
-                                              font=("Poppins", 13),
-                                              placeholder_text="YYYY-MM-DD")
+                self.dob_entry = make_date_entry(
+                    pi_frame, default_date=value if value else None,
+                    entry_width=200)
                 self.dob_entry.grid(row=idx, column=1, sticky="ew",
                                     padx=(10, 0), pady=5)
-
-                self._dob_popup = None
-
-                def show_calendar(event=None):
-                    if self._dob_popup is not None:
-                        try:
-                            self._dob_popup.destroy()
-                        except Exception:
-                            pass
-                        self._dob_popup = None
-                        return
-
-                    top = tk.Toplevel()
-                    top.overrideredirect(True)
-                    self._dob_popup = top
-
-                    self.dob_entry.update_idletasks()
-                    x = self.dob_entry.winfo_rootx()
-                    y = self.dob_entry.winfo_rooty() + self.dob_entry.winfo_height()
-                    top.geometry(f"+{x}+{y}")
-
-                    cal = Calendar(top,
-                                   selectmode="day",
-                                   date_pattern="yyyy-mm-dd",
-                                   background=MAROON, foreground=WHITE,
-                                   selectbackground=GOLD, selectforeground=MAROON,
-                                   headersbackground="#3D0A0F", headersforeground=WHITE,
-                                   normalforeground=BLACK, weekendforeground=MAROON,
-                                   font=("Poppins", 10))
-                    cal.pack()
-
-                    cur = self.dob_var.get().strip()
-                    if cur:
-                        try:
-                            cal.set_date(cur)
-                        except Exception:
-                            pass
-
-                    def pick(event=None):
-                        self.dob_var.set(cal.get_date())
-                        top.destroy()
-                        self._dob_popup = None
-
-                    cal.bind("<<CalendarSelected>>", pick)
-
-                    tk.Button(top, text="Select",
-                              bg=MAROON, fg=WHITE,
-                              font=("Poppins", 11, "bold"),
-                              command=pick).pack(fill="x", padx=5, pady=3)
-
-                self.dob_entry.bind("<Button-1>", show_calendar)
             else:
                 var = tk.StringVar(value=value)
                 self.vars[key] = var
@@ -192,7 +137,7 @@ class ProfilePage(tk.Frame):
 
     # ------------------------------------------------------------------
     def _update_profile(self):
-        dob          = self.dob_var.get().strip()
+        dob          = self.dob_entry.get().strip()
         phone_number = self.vars["phone_number"].get().strip()
         try:
             execute_query(

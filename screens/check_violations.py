@@ -4,11 +4,7 @@ import customtkinter as ctk
 from datetime import date
 from connect_db import execute_query
 
-try:
-    from tkcalendar import DateEntry
-    _TKCAL = True
-except ImportError:
-    _TKCAL = False
+from components.date_picker import make_date_entry
 
 MAROON = "#5E1219"
 GOLD   = "#EFBF04"
@@ -46,49 +42,13 @@ class CheckViolations(tk.Frame):
 
         tk.Label(filter_row, text="From:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 12)).pack(side="left", padx=(0, 4))
-        if _TKCAL:
-            self.from_entry = DateEntry(
-                filter_row, width=13,
-                background=MAROON, foreground=WHITE, borderwidth=1,
-                font=("Poppins", 12), date_pattern="yyyy-mm-dd",
-                headersbackground=MAROON, headersforeground=WHITE,
-                normalbackground=WHITE, normalforeground=BLACK,
-                weekendbackground="#FFF0F0", weekendforeground=MAROON,
-                selectbackground=MAROON, selectforeground=WHITE,
-                year=2025, month=1, day=1,
-            )
-        else:
-            self.from_var = tk.StringVar(value="2025-01-01")
-            self.from_entry = ctk.CTkEntry(
-                filter_row, textvariable=self.from_var, width=110,
-                height=34, corner_radius=6,
-                border_color=MAROON, border_width=1,
-                fg_color=WHITE, text_color=BLACK, font=("Poppins", 12)
-            )
+        self.from_entry = make_date_entry(filter_row, default_date="2025-01-01")
         self.from_entry.pack(side="left", padx=(0, 12))
 
         tk.Label(filter_row, text="To:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 12)).pack(side="left", padx=(0, 4))
         today = date.today()
-        if _TKCAL:
-            self.to_entry = DateEntry(
-                filter_row, width=13,
-                background=MAROON, foreground=WHITE, borderwidth=1,
-                font=("Poppins", 12), date_pattern="yyyy-mm-dd",
-                headersbackground=MAROON, headersforeground=WHITE,
-                normalbackground=WHITE, normalforeground=BLACK,
-                weekendbackground="#FFF0F0", weekendforeground=MAROON,
-                selectbackground=MAROON, selectforeground=WHITE,
-                year=today.year, month=today.month, day=today.day,
-            )
-        else:
-            self.to_var = tk.StringVar(value="2026-12-31")
-            self.to_entry = ctk.CTkEntry(
-                filter_row, textvariable=self.to_var, width=110,
-                height=34, corner_radius=6,
-                border_color=MAROON, border_width=1,
-                fg_color=WHITE, text_color=BLACK, font=("Poppins", 12)
-            )
+        self.to_entry = make_date_entry(filter_row, default_date=today.strftime("%Y-%m-%d"))
         self.to_entry.pack(side="left", padx=(0, 12))
 
         tk.Button(filter_row, text="Generate",
@@ -103,6 +63,13 @@ class CheckViolations(tk.Frame):
                   font=("Poppins", 12, "bold"),
                   relief="flat", bd=0, padx=16, pady=7, cursor="hand2",
                   command=self._load_all
+                  ).pack(side="left", padx=(0, 8))
+
+        tk.Button(filter_row, text="Edit Violation",
+                  fg=WHITE, bg=MAROON,
+                  font=("Poppins", 12, "bold"),
+                  relief="flat", bd=0, padx=16, pady=7, cursor="hand2",
+                  command=self._edit_violation
                   ).pack(side="left")
 
         # Treeview
@@ -148,16 +115,142 @@ class CheckViolations(tk.Frame):
         self._load_all()
 
     # ------------------------------------------------------------------
+    def _edit_violation(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showwarning("Edit Violation", "Please select a violation to edit.")
+            return
+
+        vals    = self.tree.item(sel[0])["values"]
+        vio_id  = vals[0]
+        student = vals[2]
+        room    = vals[3]
+        vtype   = vals[4]
+        points  = vals[5]
+        status  = vals[6]
+        vdate   = vals[7]
+
+        # Fetch current notes from DB
+        try:
+            rows = execute_query(
+                "SELECT notes FROM Violations WHERE violation_id = %s",
+                (vio_id,), fetch=True
+            )
+            current_notes = rows[0]["notes"] if rows and rows[0]["notes"] else ""
+        except Exception:
+            current_notes = ""
+
+        win = tk.Toplevel(self)
+        win.title(f"Edit Violation #{vio_id}")
+        win.geometry("400x500")
+        win.resizable(False, False)
+        win.configure(bg=WHITE)
+        win.grab_set()
+        self.update_idletasks()
+        wx = self.winfo_rootx() + (self.winfo_width()  - 400) // 2
+        wy = self.winfo_rooty() + (self.winfo_height() - 500) // 2
+        win.geometry(f"400x500+{wx}+{wy}")
+
+        # Scrollable canvas layout
+        canvas = tk.Canvas(win, bg=WHITE, highlightthickness=0)
+        vsb    = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        sf = tk.Frame(canvas, bg=WHITE)
+        win_id = canvas.create_window((0, 0), window=sf, anchor="nw")
+
+        def _on_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        sf.bind("<Configure>", _on_configure)
+
+        def _on_canvas_resize(e):
+            canvas.itemconfig(win_id, width=e.width)
+        canvas.bind("<Configure>", _on_canvas_resize)
+
+        def _on_mousewheel(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        sf.bind("<MouseWheel>", _on_mousewheel)
+
+        # Header inside scrollable frame
+        tk.Label(sf, text=f"Edit Violation #{vio_id}", fg=MAROON, bg=WHITE,
+                 font=("Poppins", 16, "bold")).pack(pady=(16, 4), padx=24, anchor="w")
+        tk.Frame(sf, bg="#E0E0E0", height=1).pack(fill="x", padx=20, pady=(0, 10))
+
+        form = tk.Frame(sf, bg=WHITE)
+        form.pack(fill="x", padx=24)
+
+        def _ro_row(label, value):
+            tk.Label(form, text=label, fg="#555555", bg=WHITE,
+                     font=("Poppins", 10, "bold"), anchor="w").pack(fill="x", pady=(6, 0))
+            tk.Label(form, text=str(value), fg=BLACK, bg="#F5F5F5",
+                     font=("Poppins", 11), anchor="w", relief="flat",
+                     padx=8, pady=4).pack(fill="x")
+            tk.Label(form, bg=WHITE).bind("<MouseWheel>", _on_mousewheel)
+
+        _ro_row("Violation ID",  vio_id)
+        _ro_row("Student Name",  student)
+        _ro_row("Room",          room)
+        _ro_row("Type",          vtype)
+        _ro_row("Points",        points)
+        _ro_row("Date",          vdate)
+
+        tk.Label(form, text="Status", fg="#555555", bg=WHITE,
+                 font=("Poppins", 10, "bold"), anchor="w").pack(fill="x", pady=(10, 0))
+        st_var = tk.StringVar(value=str(status))
+        ttk.Combobox(form, textvariable=st_var, values=["active", "resolved"],
+                     state="readonly", font=("Poppins", 11)
+                     ).pack(fill="x", pady=(2, 0))
+
+        tk.Label(form, text="Notes", fg="#555555", bg=WHITE,
+                 font=("Poppins", 10, "bold"), anchor="w").pack(fill="x", pady=(10, 0))
+        notes_box = tk.Text(form, height=4, font=("Poppins", 11),
+                            bg=WHITE, fg=BLACK, relief="solid",
+                            bd=1, wrap="word")
+        notes_box.pack(fill="x", pady=(2, 0))
+        notes_box.insert("1.0", current_notes)
+
+        def _save():
+            new_status = st_var.get()
+            new_notes  = notes_box.get("1.0", "end-1c").strip()
+            try:
+                execute_query(
+                    """UPDATE Violations
+                       SET status=%s, notes=%s,
+                           resolved_at=CASE WHEN %s='resolved' THEN NOW() ELSE NULL END
+                       WHERE violation_id=%s""",
+                    (new_status, new_notes, new_status, vio_id)
+                )
+                win.destroy()
+                messagebox.showinfo("Edit Violation", f"Violation #{vio_id} updated successfully.")
+                self._fetch(None, None)
+            except Exception as exc:
+                messagebox.showerror("Database Error", str(exc), parent=win)
+
+        # Buttons inside scrollable frame, below the form
+        tk.Frame(sf, bg="#E0E0E0", height=1).pack(fill="x", padx=20, pady=(16, 0))
+        btn_row = tk.Frame(sf, bg=WHITE)
+        btn_row.pack(pady=(10, 20))
+        tk.Button(btn_row, text="Cancel",
+                  fg="#555555", bg="#E0E0E0",
+                  font=("Poppins", 12, "bold"),
+                  relief="flat", bd=0, padx=20, pady=8, cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=(0, 10))
+        tk.Button(btn_row, text="Save Changes",
+                  fg=WHITE, bg=MAROON,
+                  font=("Poppins", 12, "bold"),
+                  relief="flat", bd=0, padx=20, pady=8, cursor="hand2",
+                  command=_save).pack(side="left")
+
+    # ------------------------------------------------------------------
     def _load_all(self):
         self._fetch(None, None)
 
     def _load_data(self):
-        if _TKCAL:
-            from_date = self.from_entry.get_date().strftime("%Y-%m-%d")
-            to_date   = self.to_entry.get_date().strftime("%Y-%m-%d")
-        else:
-            from_date = self.from_var.get().strip()
-            to_date   = self.to_var.get().strip()
+        from_date = self.from_entry.get().strip()
+        to_date   = self.to_entry.get().strip()
         self._fetch(from_date, to_date)
 
     def _fetch(self, from_date, to_date):

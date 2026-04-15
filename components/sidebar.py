@@ -50,9 +50,7 @@ class AppSidebar(ctk.CTkFrame):
         nav_frame = tk.Frame(self, bg=GOLD)
         nav_frame.pack(fill="x", padx=10, pady=(16, 0))
 
-        LABEL_MAP = {
-            "Manage Rules & Violations": "Manage Rules &\nViolations",
-        }
+        LABEL_MAP = {}
         for label, cmd in main_items:
             is_active = label.strip().lower() == active.strip().lower()
             display = LABEL_MAP.get(label, label)

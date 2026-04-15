@@ -4,11 +4,7 @@ import customtkinter as ctk
 from datetime import date
 from connect_db import execute_query
 
-try:
-    from tkcalendar import DateEntry
-    _TKCAL = True
-except ImportError:
-    _TKCAL = False
+from components.date_picker import make_date_entry
 
 MAROON = "#5E1219"
 GOLD   = "#EFBF04"
@@ -124,49 +120,13 @@ class ViolationsStudent(tk.Frame):
 
         tk.Label(rpt_frame, text="From:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 12)).pack(side="left", padx=(0, 4))
-        if _TKCAL:
-            self.from_entry = DateEntry(
-                rpt_frame, width=13,
-                background=MAROON, foreground=WHITE, borderwidth=1,
-                font=("Poppins", 12), date_pattern="yyyy-mm-dd",
-                headersbackground=MAROON, headersforeground=WHITE,
-                normalbackground=WHITE, normalforeground=BLACK,
-                weekendbackground="#FFF0F0", weekendforeground=MAROON,
-                selectbackground=MAROON, selectforeground=WHITE,
-                year=2025, month=1, day=1,
-            )
-        else:
-            self.from_var = tk.StringVar(value="2025-01-01")
-            self.from_entry = ctk.CTkEntry(
-                rpt_frame, textvariable=self.from_var, width=110,
-                height=32, corner_radius=6,
-                border_color=MAROON, border_width=1,
-                fg_color=WHITE, text_color=BLACK, font=("Poppins", 12)
-            )
+        self.from_entry = make_date_entry(rpt_frame, default_date="2025-01-01")
         self.from_entry.pack(side="left", padx=(0, 12))
 
         tk.Label(rpt_frame, text="To:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 12)).pack(side="left", padx=(0, 4))
         today = date.today()
-        if _TKCAL:
-            self.to_entry = DateEntry(
-                rpt_frame, width=13,
-                background=MAROON, foreground=WHITE, borderwidth=1,
-                font=("Poppins", 12), date_pattern="yyyy-mm-dd",
-                headersbackground=MAROON, headersforeground=WHITE,
-                normalbackground=WHITE, normalforeground=BLACK,
-                weekendbackground="#FFF0F0", weekendforeground=MAROON,
-                selectbackground=MAROON, selectforeground=WHITE,
-                year=today.year, month=today.month, day=today.day,
-            )
-        else:
-            self.to_var = tk.StringVar(value="2026-12-31")
-            self.to_entry = ctk.CTkEntry(
-                rpt_frame, textvariable=self.to_var, width=110,
-                height=32, corner_radius=6,
-                border_color=MAROON, border_width=1,
-                fg_color=WHITE, text_color=BLACK, font=("Poppins", 12)
-            )
+        self.to_entry = make_date_entry(rpt_frame, default_date=today.strftime("%Y-%m-%d"))
         self.to_entry.pack(side="left", padx=(0, 12))
 
         tk.Button(rpt_frame, text="Generate",
@@ -223,12 +183,8 @@ class ViolationsStudent(tk.Frame):
             self.tree.move(k, "", index)
 
     def _generate_report(self):
-        if _TKCAL:
-            from_date = self.from_entry.get_date().strftime("%Y-%m-%d")
-            to_date   = self.to_entry.get_date().strftime("%Y-%m-%d")
-        else:
-            from_date = self.from_var.get().strip()
-            to_date   = self.to_var.get().strip()
+        from_date = self.from_entry.get().strip()
+        to_date   = self.to_entry.get().strip()
         try:
             rows = execute_query(
                 """SELECT v.violation_id, v.violation_type, v.points_assessed,
