@@ -324,7 +324,7 @@ class App(ctk.CTk):
     # Navigation
     # ------------------------------------------------------------------
     def _navigate(self, screen_name: str):
-        if screen_name == "logout":
+        if screen_name in ("logout", "logout_to_forgot"):
             self.user_info = {}
             if self._app_container is not None:
                 try:
@@ -332,11 +332,14 @@ class App(ctk.CTk):
                 except Exception:
                     pass
                 self._app_container = None
-            self._app_content  = None
-            self._app_screen   = None
-            self.nav_buttons   = {}
+            self._app_content   = None
+            self._app_screen    = None
+            self.nav_buttons    = {}
             self._current_frame = None   # reset so _swap works cleanly
-            self._show_login()
+            if screen_name == "logout_to_forgot":
+                self._show_forgot()
+            else:
+                self._show_login()
             return
 
         if screen_name in SCREEN_MAP:
@@ -375,10 +378,12 @@ class App(ctk.CTk):
         self._auth_screen.grid(row=0, column=0, sticky="nsew")
         self._auth_content.update_idletasks()
 
-    def _show_forgot(self):
+    def _show_forgot(self, **kwargs):
         self._swap(self._auth_container)
         self._clear_auth_content()
-        self._auth_screen = ForgotPasswordScreen(self._auth_content, on_login=self._show_login)
+        self._auth_screen = ForgotPasswordScreen(
+            self._auth_content, on_login=self._show_login, **kwargs
+        )
         self._auth_screen.grid(row=0, column=0, sticky="nsew")
         self._auth_content.update_idletasks()
 

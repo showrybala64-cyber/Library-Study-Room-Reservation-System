@@ -149,58 +149,44 @@ class ProfilePage(tk.Frame):
             messagebox.showerror("Database Error", str(exc))
 
     def _change_password(self):
-        win = tk.Toplevel(self)
-        win.title("Change Password")
-        win.geometry("360x260")
-        win.resizable(False, False)
-        win.configure(bg=WHITE)
-        win.grab_set()
+        popup = tk.Toplevel(self)
+        popup.title("Change Password")
+        popup.resizable(False, False)
+        popup.configure(bg=WHITE)
+        popup.grab_set()
+        popup.update_idletasks()
 
-        tk.Label(win, text="Change Password", fg=MAROON, bg=WHITE,
-                 font=("Poppins", 16, "bold")).pack(pady=(20, 10))
+        pw, ph = 420, 240
+        px = self.winfo_rootx() + (self.winfo_width()  - pw) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - ph) // 2
+        popup.geometry(f"{pw}x{ph}+{px}+{py}")
 
-        fields = [("Current Password", "cur"), ("New Password", "new"), ("Confirm New", "con")]
-        vars_  = {}
-        for label, key in fields:
-            tk.Label(win, text=label, fg=BLACK, bg=WHITE,
-                     font=("Poppins", 12)).pack(anchor="w", padx=30)
-            var = tk.StringVar()
-            vars_[key] = var
-            ctk.CTkEntry(win, textvariable=var, show="•",
-                         height=34, corner_radius=6,
-                         border_color=MAROON, border_width=1,
-                         fg_color=WHITE, text_color=BLACK,
-                         font=("Poppins", 12)
-                         ).pack(fill="x", padx=30, pady=(2, 8))
+        tk.Label(popup, text="\U0001F512", bg=WHITE,
+                 font=("Segoe UI Emoji", 24)).pack(pady=(20, 4))
 
-        def submit():
-            cur = vars_["cur"].get()
-            new = vars_["new"].get()
-            con = vars_["con"].get()
-            if not all([cur, new, con]):
-                messagebox.showwarning("Change Password", "Fill in all fields.", parent=win)
-                return
-            if new != con:
-                messagebox.showerror("Change Password", "New passwords do not match.", parent=win)
-                return
-            try:
-                rows = execute_query(
-                    "SELECT user_id FROM Users WHERE user_id = %s AND password_hash = %s",
-                    (self.user_info["user_id"], cur), fetch=True
-                )
-                if not rows:
-                    messagebox.showerror("Change Password", "Current password is incorrect.", parent=win)
-                    return
-                execute_query(
-                    "UPDATE Users SET password_hash = %s WHERE user_id = %s",
-                    (new, self.user_info["user_id"])
-                )
-                messagebox.showinfo("Change Password", "Password changed successfully.", parent=win)
-                win.destroy()
-            except Exception as exc:
-                messagebox.showerror("Database Error", str(exc), parent=win)
+        tk.Label(popup,
+                 text="To change your password, you will be redirected to the\n"
+                      "Forgot Password screen. Do you want to continue?",
+                 fg="#333333", bg=WHITE, font=("Poppins", 13),
+                 justify="center", wraplength=380).pack(padx=20)
 
-        tk.Button(win, text="SUBMIT", fg=WHITE, bg=MAROON,
-                  font=("Poppins", 13, "bold"),
-                  relief="flat", bd=0, padx=24, pady=8, cursor="hand2",
-                  command=submit).pack(pady=(4, 0))
+        btn_row = tk.Frame(popup, bg=WHITE)
+        btn_row.pack(pady=(15, 15))
+
+        def go_forgot():
+            popup.destroy()
+            # Logout clears the session and returns to the login screen,
+            # from which the user can access Forgot Password directly.
+            self.navigator("logout_to_forgot")
+
+        tk.Button(btn_row, text="Go to Forgot Password",
+                  fg=WHITE, bg=MAROON,
+                  font=("Poppins", 12, "bold"),
+                  relief="flat", bd=0, width=18, pady=8, cursor="hand2",
+                  command=go_forgot).pack(side="left", padx=(0, 10))
+
+        tk.Button(btn_row, text="Cancel",
+                  fg=BLACK, bg="#CCCCCC",
+                  font=("Poppins", 12),
+                  relief="flat", bd=0, width=10, pady=8, cursor="hand2",
+                  command=popup.destroy).pack(side="left")

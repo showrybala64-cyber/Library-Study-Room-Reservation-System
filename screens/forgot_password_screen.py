@@ -20,9 +20,11 @@ def _sha256(text: str) -> str:
 
 
 class ForgotPasswordScreen(tk.Frame):
-    def __init__(self, parent, on_login, **kwargs):
+    def __init__(self, parent, on_login, prefill_email: str = "", temp_mode: bool = False, **kwargs):
         super().__init__(parent, bg=GOLD, **kwargs)
-        self.on_login = on_login
+        self.on_login      = on_login
+        self._prefill_email = prefill_email
+        self._temp_mode    = temp_mode
         self._build()
 
     # ------------------------------------------------------------------
@@ -97,37 +99,58 @@ class ForgotPasswordScreen(tk.Frame):
             lbl.grid(row=row, column=0, sticky="w", padx=30, pady=(14, 0))
             lbl.bind("<MouseWheel>", _on_wheel)
 
-        def _add_entry(row, var):
+        def _add_entry(row, var, state="normal"):
             entry = ctk.CTkEntry(form, textvariable=var,
                                   height=42, corner_radius=8,
                                   border_color=MAROON, border_width=2,
                                   fg_color=WHITE, text_color=BLACK,
-                                  font=("Poppins", 13))
+                                  font=("Poppins", 13), state=state)
             entry.grid(row=row, column=0, sticky="ew", padx=30, pady=(2, 0))
             entry.bind("<MouseWheel>", _on_wheel)
 
-        # Email (rows 0, 1)
-        email_var = tk.StringVar()
-        self.vars["email"] = email_var
-        _add_label(0, "Email Address *")
-        _add_entry(1, email_var)
+        # Temp-mode banner (row -1, packed before grid rows)
+        if self._temp_mode:
+            banner = tk.Frame(form, bg="#FFF3CD", relief="flat", bd=0)
+            banner.grid(row=0, column=0, sticky="ew", padx=30, pady=(14, 0))
+            banner.bind("<MouseWheel>", _on_wheel)
+            tk.Label(
+                banner,
+                text="\u26a0  Please enter 'mypass' as your current password "
+                     "and set a new password below.",
+                fg="#7D5A00", bg="#FFF3CD",
+                font=("Poppins", 11), wraplength=330, justify="left",
+                padx=10, pady=8
+            ).pack(fill="x")
+            email_row_offset = 1
+        else:
+            email_row_offset = 0
 
-        # Old password (rows 2, 3)
+        # Email (rows offset, offset+1)
+        email_var = tk.StringVar(value=self._prefill_email)
+        self.vars["email"] = email_var
+        email_state = "readonly" if (self._temp_mode and self._prefill_email) else "normal"
+        _add_label(email_row_offset,     "Email Address *")
+        _add_entry(email_row_offset + 1, email_var, state=email_state)
+
+        # r is the last row used; all subsequent fields shift with email_row_offset
+        r = email_row_offset + 1
+
+        # Old / Temporary password
         old_var = tk.StringVar()
         self.vars["old_pass"] = old_var
-        _add_label(2, "Temporary / Old Password *")
-        self._pw_field(form, 3, old_var, _on_wheel)
+        _add_label(r + 1, "Current / Temporary Password *")
+        self._pw_field(form, r + 2, old_var, _on_wheel)
 
-        # New password (rows 4, 5)
+        # New password
         new_var = tk.StringVar()
         self.vars["new_pass"] = new_var
-        _add_label(4, "New Password *")
-        self._pw_field(form, 5, new_var, _on_wheel)
+        _add_label(r + 3, "New Password *")
+        self._pw_field(form, r + 4, new_var, _on_wheel)
 
-        # ── Live password checker (row 6) ──────────────────────────
+        # ── Live password checker ──────────────────────────────────
         self._fp_rule_labels = {}
         checker_frame = tk.Frame(form, bg=CREAM)
-        checker_frame.grid(row=6, column=0, sticky="w", padx=30, pady=(4, 0))
+        checker_frame.grid(row=r + 5, column=0, sticky="w", padx=30, pady=(4, 0))
         checker_frame.bind("<MouseWheel>", _on_wheel)
         _RULE_DEFS = [
             ("length",  "At least 8 characters"),
@@ -143,27 +166,27 @@ class ForgotPasswordScreen(tk.Frame):
             rl.bind("<MouseWheel>", _on_wheel)
             self._fp_rule_labels[rkey] = rl
 
-        # Confirm password (rows 7, 8)
+        # Confirm password
         confirm_var = tk.StringVar()
         self.vars["confirm"] = confirm_var
-        _add_label(7, "Confirm New Password *")
-        self._pw_field(form, 8, confirm_var, _on_wheel)
+        _add_label(r + 6, "Confirm New Password *")
+        self._pw_field(form, r + 7, confirm_var, _on_wheel)
 
-        # Match indicator (row 9)
+        # Match indicator
         self._fp_match_lbl = tk.Label(form, text="", bg=CREAM, font=("Poppins", 10))
-        self._fp_match_lbl.grid(row=9, column=0, sticky="w", padx=30)
+        self._fp_match_lbl.grid(row=r + 8, column=0, sticky="w", padx=30)
         self._fp_match_lbl.bind("<MouseWheel>", _on_wheel)
 
         # Bind traces
         new_var.trace_add("write", lambda *_: self._update_fp_checker())
         confirm_var.trace_add("write", lambda *_: self._update_fp_checker())
 
-        # Divider (row 10)
+        # Divider
         div = tk.Frame(form, bg="#D8D0C8", height=1)
-        div.grid(row=10, column=0, sticky="ew", padx=30, pady=(16, 0))
+        div.grid(row=r + 9, column=0, sticky="ew", padx=30, pady=(16, 0))
         div.bind("<MouseWheel>", _on_wheel)
 
-        # SUBMIT button — full width (row 11)
+        # SUBMIT button
         sub_btn = ctk.CTkButton(
             form, text="SUBMIT",
             text_color=WHITE, fg_color=MAROON, hover_color="#8B1A24",
@@ -171,16 +194,16 @@ class ForgotPasswordScreen(tk.Frame):
             corner_radius=8, height=46, cursor="hand2",
             command=self._do_reset
         )
-        sub_btn.grid(row=11, column=0, sticky="ew", padx=30, pady=(14, 6))
+        sub_btn.grid(row=r + 10, column=0, sticky="ew", padx=30, pady=(14, 6))
         sub_btn.bind("<MouseWheel>", _on_wheel)
 
-        # Back to Login link (row 12)
+        # Back to Login link
         back_lbl = tk.Label(form,
                              text="← Back to Login",
                              fg=MAROON, bg=CREAM,
                              font=("Poppins", 12, "underline"),
                              cursor="hand2")
-        back_lbl.grid(row=12, column=0, pady=(0, 24))
+        back_lbl.grid(row=r + 11, column=0, pady=(0, 24))
         back_lbl.bind("<Button-1>", lambda e: self.on_login())
         back_lbl.bind("<MouseWheel>", _on_wheel)
 
@@ -293,14 +316,18 @@ class ForgotPasswordScreen(tk.Frame):
                 (v["email"], hashed_old), fetch=True
             )
             if not rows:
-                messagebox.showerror("Reset", "Email or old password is incorrect.")
+                messagebox.showerror("Reset", "Incorrect current/temporary password.")
                 return
 
             execute_query(
-                "UPDATE Users SET password_hash = %s WHERE email = %s",
+                "UPDATE Users SET password_hash = %s, password_reset_required = 0 "
+                "WHERE email = %s",
                 (hashed_new, v["email"])
             )
-            messagebox.showinfo("Reset", "Password updated successfully! Please log in.")
+            messagebox.showinfo(
+                "Reset",
+                "Password updated successfully. Please login with your new password."
+            )
             self.on_login()
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))

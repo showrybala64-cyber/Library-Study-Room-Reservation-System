@@ -7,3 +7,4 @@ pytz>=2024.1
 Babel>=2.12.0
 openpyxl>=3.1.0
 matplotlib>=3.8.0
+reportlab>=4.0.0

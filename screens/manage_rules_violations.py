@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
 from datetime import date
-from connect_db import execute_query
+from connect_db import execute_query, get_connection
 
 try:
     from tkcalendar import DateEntry
@@ -68,12 +68,14 @@ class ManageRulesViolations(tk.Frame):
 
         rule_btn_row = tk.Frame(content, bg=WHITE)
         rule_btn_row.grid(row=3, column=0, sticky="w", pady=(0, 6))
-        for lbl, cmd in [("Add Rule Set", self._add_rule),
-                          ("Edit Rule Set", self._edit_rule),
-                          ("Remove Rule Set", self._remove_rule),
-                          ("Refresh", self._load_data)]:
+        for lbl, cmd in [("Add Rule Set",            self._add_rule),
+                          ("Edit Rule Set",           self._edit_rule),
+                          ("Remove Rule Set",         self._remove_rule),
+                          ("Reset Student Password",  self._open_reset_password_popup),
+                          ("Refresh",                 self._load_data)]:
+            bg = "#AA0000" if "Remove" in lbl else MAROON
             tk.Button(rule_btn_row, text=lbl,
-                      fg=WHITE, bg=MAROON if "Remove" not in lbl else "#AA0000",
+                      fg=WHITE, bg=bg,
                       font=("Poppins", 12, "bold"),
                       relief="flat", bd=0, padx=14, pady=6, cursor="hand2",
                       command=cmd
@@ -443,4 +445,258 @@ class ManageRulesViolations(tk.Frame):
             self._load_data()
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
+
+    # ------------------------------------------------------------------
+    def _open_reset_password_popup(self):
+        import re
+
+        conn   = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT user_id, first_name, last_name, email "
+            "FROM Users WHERE role='student' ORDER BY first_name"
+        )
+        all_students = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        popup = tk.Toplevel(self)
+        popup.title("Reset Student Password")
+        popup.geometry("420x600")
+        popup.resizable(False, False)
+        popup.configure(bg="white")
+        popup.grab_set()
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth()  // 2) - 210
+        y = (popup.winfo_screenheight() // 2) - 300
+        popup.geometry(f"420x600+{x}+{y}")
+
+        # ── Scrollable canvas ──────────────────────────────────────────
+        main_canvas = tk.Canvas(popup, bg="white", highlightthickness=0)
+        vsb = tk.Scrollbar(popup, orient="vertical", command=main_canvas.yview)
+        main_canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        main_canvas.pack(side="left", fill="both", expand=True)
+
+        inner = tk.Frame(main_canvas, bg="white")
+        inner_window = main_canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def on_frame_configure(e):
+            main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+
+        def on_canvas_configure(e):
+            main_canvas.itemconfig(inner_window, width=e.width)
+
+        def on_mousewheel(e):
+            main_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        inner.bind("<Configure>", on_frame_configure)
+        main_canvas.bind("<Configure>", on_canvas_configure)
+        main_canvas.bind("<MouseWheel>", on_mousewheel)
+        inner.bind("<MouseWheel>", on_mousewheel)
+
+        selected = [None]
+
+        # ── Title ──────────────────────────────────────────────────────
+        tk.Label(inner, text="Reset Student Password",
+                 font=("Poppins", 13, "bold"), bg="white", fg="#5E1219"
+                 ).pack(pady=(10, 3), padx=20, anchor="w")
+        tk.Frame(inner, bg="#5E1219", height=2).pack(fill="x", padx=20, pady=(0, 6))
+
+        tk.Label(inner,
+                 text="Search for a student and select them from the list.\n"
+                      "Their password will be reset to the temporary password 'mypass'.\n"
+                      "They will be prompted to change it on next login.",
+                 font=("Poppins", 10), bg="white", fg="#666666",
+                 justify="left", wraplength=370
+                 ).pack(padx=20, anchor="w")
+        tk.Frame(inner, bg="#DDDDDD", height=1).pack(fill="x", padx=20, pady=10)
+
+        # ── Search ─────────────────────────────────────────────────────
+        tk.Label(inner, text="Search Student:",
+                 font=("Poppins", 11, "bold"), bg="white", fg="#5E1219"
+                 ).pack(padx=20, pady=(6, 2), anchor="w")
+
+        search_var   = tk.StringVar()
+        search_frame = tk.Frame(inner, bg="white")
+        search_frame.pack(padx=20, pady=(3, 0), fill="x")
+
+        search_entry = tk.Entry(search_frame, textvariable=search_var,
+                                font=("Poppins", 11), relief="solid", bd=1)
+        search_entry.pack(side="left", fill="x", expand=True, ipady=5)
+
+        def clear_search():
+            search_var.set("")
+            selected[0] = None
+            update_selected_display()
+            search_entry.focus_set()
+
+        tk.Button(search_frame, text="\u2715", font=("Poppins", 10),
+                  bg="white", fg="#666", relief="flat", bd=0,
+                  command=clear_search).pack(side="left", padx=(4, 0))
+
+        # ── Listbox ────────────────────────────────────────────────────
+        list_frame = tk.Frame(inner, bg="white")
+        list_frame.pack(padx=20, pady=(2, 0), fill="x")
+
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+
+        listbox = tk.Listbox(list_frame, font=("Poppins", 10),
+                             height=5, relief="solid", bd=1,
+                             selectbackground="#5E1219", selectforeground="white",
+                             activestyle="none",
+                             yscrollcommand=scrollbar.set)
+        listbox.pack(side="left", fill="x", expand=True)
+        listbox.bind("<MouseWheel>", on_mousewheel)
+        scrollbar.config(command=listbox.yview)
+
+        def populate_listbox(students):
+            listbox.delete(0, "end")
+            for s in students:
+                listbox.insert(
+                    "end",
+                    f"{s['first_name']} {s['last_name']}  (ID: {s['user_id']})"
+                )
+
+        populate_listbox(all_students)
+
+        def on_search(*args):
+            typed = search_var.get().strip().lower()
+            if not typed:
+                populate_listbox(all_students)
+            else:
+                filtered = [
+                    s for s in all_students
+                    if s["first_name"].lower().startswith(typed)
+                    or s["last_name"].lower().startswith(typed)
+                ]
+                populate_listbox(filtered)
+
+        search_var.trace_add("write", on_search)
+
+        def on_select(event=None):
+            try:
+                idx = listbox.curselection()
+                if not idx:
+                    return
+                text  = listbox.get(idx[0])
+                match = re.search(r"ID:\s*(\d+)", text)
+                if not match:
+                    return
+                uid     = int(match.group(1))
+                student = next((s for s in all_students if s["user_id"] == uid), None)
+                if student:
+                    selected[0] = student
+                    update_selected_display()
+            except Exception as e:
+                print(f"on_select error: {e}")
+
+        listbox.bind("<<ListboxSelect>>", on_select)
+        listbox.bind("<ButtonRelease-1>", on_select)
+
+        tk.Frame(inner, bg="#DDDDDD", height=1).pack(fill="x", padx=20, pady=10)
+
+        # ── Selected student display ────────────────────────────────────
+        tk.Label(inner, text="Selected Student:",
+                 font=("Poppins", 11, "bold"), bg="white", fg="#5E1219"
+                 ).pack(padx=20, anchor="w")
+
+        info_frame = tk.Frame(inner, bg="#FFF8E7", bd=1, relief="solid")
+        info_frame.pack(padx=20, pady=(3, 0), fill="x")
+
+        name_var  = tk.StringVar(value="No student selected")
+        email_var = tk.StringVar(value="")
+        id_var    = tk.StringVar(value="")
+
+        tk.Label(info_frame, textvariable=name_var,
+                 font=("Poppins", 11, "bold"), bg="#FFF8E7", fg="#5E1219",
+                 anchor="w").pack(padx=10, pady=(5, 1), fill="x")
+        tk.Label(info_frame, textvariable=email_var,
+                 font=("Poppins", 10), bg="#FFF8E7", fg="#333333",
+                 anchor="w").pack(padx=10, pady=(1, 1), fill="x")
+        tk.Label(info_frame, textvariable=id_var,
+                 font=("Poppins", 10), bg="#FFF8E7", fg="#333333",
+                 anchor="w").pack(padx=10, pady=(1, 5), fill="x")
+
+        def update_selected_display():
+            s = selected[0]
+            if s:
+                name_var.set(f"{s['first_name']} {s['last_name']}")
+                email_var.set(f"Email:    {s['email']}")
+                id_var.set(f"User ID: {s['user_id']}")
+                reset_btn.configure(state="normal", fg_color="#5E1219")
+            else:
+                name_var.set("No student selected")
+                email_var.set("")
+                id_var.set("")
+                reset_btn.configure(state="disabled", fg_color="#999999")
+
+        # ── Warning ────────────────────────────────────────────────────
+        tk.Label(inner,
+                 text="\u26a0  This will set the student's password to 'mypass'.\n"
+                      "    They must change it on next login.",
+                 font=("Poppins", 10), bg="white", fg="#CC6600",
+                 justify="left").pack(padx=20, pady=(6, 0), anchor="w")
+
+        # ── Buttons ────────────────────────────────────────────────────
+        btn_frame = tk.Frame(inner, bg="white")
+        btn_frame.pack(pady=(10, 15), padx=20, fill="x")
+
+        def do_reset():
+            s = selected[0]
+            if not s:
+                messagebox.showwarning("No Student Selected",
+                                       "Please select a student first.",
+                                       parent=popup)
+                return
+            confirm = messagebox.askyesno(
+                "Confirm Password Reset",
+                f"Reset password for {s['first_name']} {s['last_name']}?\n\n"
+                f"Their password will be set to 'mypass'.\n"
+                f"They will be required to change it on next login.",
+                parent=popup
+            )
+            if not confirm:
+                return
+            try:
+                conn   = get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE Users SET password_hash = SHA2('mypass', 256), "
+                    "password_reset_required = 1 WHERE user_id = %s",
+                    (s["user_id"],)
+                )
+                conn.commit()
+                cursor.close()
+                conn.close()
+                messagebox.showinfo(
+                    "Password Reset",
+                    f"Password for {s['first_name']} {s['last_name']} has been "
+                    f"reset to 'mypass'.\n"
+                    f"They will be prompted to change it on next login.",
+                    parent=popup
+                )
+                popup.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to reset password:\n{e}",
+                                     parent=popup)
+
+        reset_btn = ctk.CTkButton(btn_frame, text="Reset Password",
+                                  width=180, height=38,
+                                  font=("Poppins", 12, "bold"),
+                                  fg_color="#999999", text_color="white",
+                                  state="disabled",
+                                  command=do_reset)
+        reset_btn.pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(btn_frame, text="Cancel",
+                      width=100, height=38,
+                      font=("Poppins", 11),
+                      fg_color="#888888", text_color="white",
+                      command=popup.destroy).pack(side="left")
+
+        popup.update_idletasks()
+        main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        popup.after(100, lambda: main_canvas.yview_moveto(0.0))
 

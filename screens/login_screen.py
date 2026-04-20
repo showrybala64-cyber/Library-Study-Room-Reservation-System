@@ -136,6 +136,8 @@ class LoginScreen(tk.Frame):
             self.eye_lbl.place(x=x, y=y)
 
         right.after(100, _place_pw_eye)
+        self.after(100, self._refresh_eye_icons)
+        self.after(50, self._force_render)
 
         # Remember me
         self.remember_var = tk.BooleanVar()
@@ -176,6 +178,23 @@ class LoginScreen(tk.Frame):
 
         email_entry.bind("<Return>",     lambda e: self._do_login())
         self.pw_entry.bind("<Return>",   lambda e: self._do_login())
+
+    # ------------------------------------------------------------------
+    def _refresh_eye_icons(self):
+        try:
+            for widget in self.winfo_children():
+                widget.update_idletasks()
+            self.update_idletasks()
+            self.update()
+        except Exception:
+            pass
+
+    def _force_render(self):
+        try:
+            self.pw_entry.focus_set()
+            self.update_idletasks()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def _toggle_password(self, event=None):
@@ -366,6 +385,57 @@ class LoginScreen(tk.Frame):
                   command=try_again).pack(side="left")
 
     # ------------------------------------------------------------------
+    def _show_temp_password_popup(self, email: str):
+        popup = tk.Toplevel(self)
+        popup.title("Temporary Password Detected")
+        popup.geometry("420x320")
+        popup.resizable(False, False)
+        popup.configure(bg=WHITE)
+        popup.grab_set()
+        popup.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth()  // 2) - 210
+        y = (popup.winfo_screenheight() // 2) - 160
+        popup.geometry(f"420x320+{x}+{y}")
+
+        content = tk.Frame(popup, bg=WHITE)
+        content.pack(fill="both", expand=True, padx=30, pady=25)
+
+        tk.Label(content, text="\U0001F512",
+                 font=("Segoe UI Emoji", 32), bg=WHITE
+                 ).pack(pady=(0, 10))
+
+        tk.Label(content, text="Temporary Password Detected",
+                 font=("Poppins", 13, "bold"),
+                 bg=WHITE, fg=MAROON
+                 ).pack(pady=(0, 12))
+
+        tk.Frame(content, bg=MAROON, height=2).pack(fill="x", pady=(0, 15))
+
+        tk.Label(content,
+                 text="You are logged in with a temporary password.\n"
+                      "For your security, you must update your\n"
+                      "password before continuing.",
+                 font=("Poppins", 11),
+                 bg=WHITE, fg="#444444",
+                 justify="center"
+                 ).pack(pady=(0, 20))
+
+        def go_change():
+            popup.destroy()
+            self.on_forgot(prefill_email=email, temp_mode=True)
+
+        ctk.CTkButton(content,
+                      text="Change My Password",
+                      width=220, height=42,
+                      font=("Poppins", 12, "bold"),
+                      fg_color=MAROON,
+                      hover_color="#3D0A0F",
+                      text_color=WHITE,
+                      command=go_change).pack()
+
+    # ------------------------------------------------------------------
     def _do_login(self):
         identifier = self.email_var.get().strip()
         password   = self.pass_var.get().strip()
@@ -378,7 +448,8 @@ class LoginScreen(tk.Frame):
 
         try:
             rows = execute_query(
-                """SELECT user_id, first_name, last_name, role, account_status
+                """SELECT user_id, first_name, last_name, role, account_status,
+                          email, password_reset_required
                    FROM Users
                    WHERE (email = %s OR user_id = %s) AND password_hash = %s
                    LIMIT 1""",
@@ -404,6 +475,11 @@ class LoginScreen(tk.Frame):
                 "Your account has been suspended due to policy violations.\n"
                 "Please contact the library administration."
             )
+            return
+
+        # Temporary password — force reset before allowing access
+        if user.get("password_reset_required"):
+            self._show_temp_password_popup(user["email"])
             return
 
         self._fail_count = 0

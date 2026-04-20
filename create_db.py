@@ -27,6 +27,7 @@ CREATE_STATEMENTS = [
         updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
                                        ON UPDATE CURRENT_TIMESTAMP,
         last_login_at    DATETIME      NULL,
+        password_reset_required TINYINT(1) NOT NULL DEFAULT 0,
         PRIMARY KEY (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -145,6 +146,8 @@ ALTER_STATEMENTS = [
      "DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at"),
     ("Users", "last_login_at",
      "ALTER TABLE Users ADD COLUMN last_login_at DATETIME NULL AFTER updated_at"),
+    ("Users", "password_reset_required",
+     "ALTER TABLE Users ADD COLUMN password_reset_required TINYINT(1) NOT NULL DEFAULT 0 AFTER last_login_at"),
 
     # Rooms
     ("Rooms", "room_code",
