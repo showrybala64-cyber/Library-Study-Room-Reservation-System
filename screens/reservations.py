@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 from connect_db import execute_query
 
 MAROON = "#5E1219"
@@ -134,7 +135,6 @@ class Reservations(tk.Frame):
         if res_id is None:
             return
         try:
-            # Validate grace period from Rules
             rules = execute_query(
                 "SELECT checkin_grace_minutes FROM Rules WHERE is_active = TRUE ORDER BY rule_set_id DESC LIMIT 1",
                 fetch=True
@@ -153,19 +153,32 @@ class Reservations(tk.Frame):
                 messagebox.showerror("Check-In", f"Cannot check in: status is '{r['status']}'.")
                 return
 
-            start_dt = datetime.combine(r["reservation_date"],
-                                        (datetime.min + r["start_time"]).time())
-            deadline  = start_dt + __import__("datetime").timedelta(minutes=grace)
-            now       = datetime.now()
-            if now > deadline:
+            est = pytz.timezone("US/Eastern")
+            now = datetime.now(est).replace(tzinfo=None)
+
+            start_dt     = datetime.combine(r["reservation_date"],
+                                            (datetime.min + r["start_time"]).time())
+            checkin_open  = start_dt - timedelta(minutes=15)
+            checkin_close = start_dt + timedelta(minutes=grace)
+
+            if now < checkin_open:
+                open_str = checkin_open.strftime("%I:%M %p")
                 messagebox.showerror(
+                    "Check-In Not Available Yet",
+                    f"Check-in is not available yet.\n"
+                    f"You can check in from {open_str} onwards."
+                )
+                return
+
+            if now > checkin_close:
+                messagebox.showinfo(
                     "Check-In",
-                    f"Grace period of {grace} min has passed. Check-in not allowed."
+                    "Check-in window has passed for this reservation."
                 )
                 return
 
             execute_query(
-                "INSERT INTO CheckIns (reservation_id, checkin_time) VALUES (%s, NOW())",
+                "INSERT INTO Check_Ins (reservation_id, checkin_time) VALUES (%s, NOW())",
                 (res_id,)
             )
             execute_query(

@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(del \"C:\\\\Users\\\\showr\\\\BIS698_project\\\\assets\\\\events_banner.png\")"
-    ]
-  }
-}

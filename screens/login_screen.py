@@ -156,25 +156,33 @@ class LoginScreen(tk.Frame):
             command=self._do_login
         ).grid(row=7, column=0, sticky="ew", pady=(0, 12))
 
-        # Links – centered below LOGIN button
-        link_frame = tk.Frame(right, bg=WHITE)
-        link_frame.grid(row=8, column=0, sticky="ew")
+        # Sign Up + Forgot Password below LOGIN
+        tk.Label(right, text="Don't have an account?",
+                 font=("Poppins", 12), fg="#444444", bg=WHITE
+                 ).grid(row=8, column=0, pady=(12, 4))
 
-        signup_lbl = tk.Label(link_frame,
-                              text="Don't have an account? Sign up",
-                              fg=MAROON, bg=WHITE,
-                              font=("Poppins", 12, "underline"),
-                              cursor="hand2")
-        signup_lbl.pack(anchor="center")
-        signup_lbl.bind("<Button-1>", lambda e: self.on_signup())
+        signup_btn = ctk.CTkButton(
+            right, text="Sign Up",
+            text_color=MAROON, fg_color=WHITE,
+            hover_color=MAROON,
+            border_width=2, border_color=MAROON,
+            font=("Poppins", 14, "bold"),
+            corner_radius=8, height=42, cursor="hand2",
+            command=self.on_signup
+        )
+        signup_btn.grid(row=9, column=0, sticky="ew")
+        signup_btn.bind("<Enter>", lambda e: signup_btn.configure(text_color=WHITE, fg_color=MAROON))
+        signup_btn.bind("<Leave>", lambda e: signup_btn.configure(text_color=MAROON, fg_color=WHITE))
 
-        forgot_lbl = tk.Label(link_frame,
-                              text="Forgot Password?",
-                              fg="#CC0000", bg=WHITE,
-                              font=("Poppins", 12, "underline", "bold"),
-                              cursor="hand2")
-        forgot_lbl.pack(anchor="center", pady=(6, 0))
-        forgot_lbl.bind("<Button-1>", lambda e: self.on_forgot())
+        ctk.CTkButton(
+            right, text="Forgot Password",
+            text_color=WHITE, fg_color=MAROON,
+            hover_color="#8B1A24",
+            border_width=0,
+            font=("Poppins", 14, "bold"),
+            corner_radius=8, height=42, cursor="hand2",
+            command=self._show_forgot_popup
+        ).grid(row=10, column=0, sticky="ew", pady=(8, 0))
 
         email_entry.bind("<Return>",     lambda e: self._do_login())
         self.pw_entry.bind("<Return>",   lambda e: self._do_login())
