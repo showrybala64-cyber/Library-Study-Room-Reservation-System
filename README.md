@@ -94,9 +94,9 @@ pip install -r requirements.txt
 Create a file named `credentials.py` in the project root:
 
 ```python
-DB_HOST     = "141.209.241.57"
-DB_PORT     = 3306
-DB_NAME     = "BIS698WSpring26_7"
+DB_HOST     = "141.209.241.57" - example
+DB_PORT     = port_number
+DB_NAME     = "your_database_name"
 DB_USER     = "your_username"
 DB_PASSWORD = "your_password"
 ```
