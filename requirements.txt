@@ -1,10 +1,13 @@
-customtkinter>=5.2.0
-mysql-connector-python>=8.0.33
-Pillow>=10.0.0
-python-dotenv>=1.0.0
-tkcalendar>=1.6.1
-pytz>=2024.1
-Babel>=2.12.0
-openpyxl>=3.1.0
-matplotlib>=3.8.0
-reportlab>=4.0.0
+# Python dependencies for the CMU Library Room Reservation System.
+# Install with: pip install -r requirements.txt
+
+customtkinter>=5.2.0          # modern themed tkinter widgets
+mysql-connector-python>=8.0.33 # MySQL database driver
+Pillow>=10.0.0                 # image loading for logos and assets
+python-dotenv>=1.0.0           # optional env-file support
+tkcalendar>=1.6.1              # Calendar widget used in date_picker fallback
+pytz>=2024.1                   # timezone handling for check-in window logic
+Babel>=2.12.0                  # locale support required by tkcalendar
+openpyxl>=3.1.0                # Excel export for reports
+matplotlib>=3.8.0              # embedded charts on dashboards
+reportlab>=4.0.0               # PDF export for reports

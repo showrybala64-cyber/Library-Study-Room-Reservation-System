@@ -1,9 +1,15 @@
+# Admin policy management screen.
+# Manages rule sets (booking limits, grace periods, penalty points) and provides
+# the admin password reset tool that issues a temporary 'mypass' credential.
+# SHA2 is used here to match MySQL's native SHA2 function, not Python's hashlib.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
 from datetime import date
 from connect_db import execute_query, get_connection
 
+# tkcalendar is optional; falls back to a plain CTkEntry for the date field.
 try:
     from tkcalendar import DateEntry
     _TKCAL = True
@@ -27,7 +33,6 @@ class ManageRulesViolations(tk.Frame):
         self.navigator = navigator
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -123,7 +128,6 @@ class ManageRulesViolations(tk.Frame):
 
         self._load_data()
 
-    # ------------------------------------------------------------------
     def _load_data(self):
         for r in self.rule_tree.get_children():
             self.rule_tree.delete(r)
@@ -161,7 +165,6 @@ class ManageRulesViolations(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
-    # ------------------------------------------------------------------
     def _add_rule(self):
         win = tk.Toplevel(self)
         win.title("Add Rule Set")
@@ -316,6 +319,7 @@ class ManageRulesViolations(tk.Frame):
                 return
 
             try:
+                # Deactivate existing rules before inserting so exactly one is active at a time.
                 if active_var.get():
                     execute_query("UPDATE Rules SET is_active = FALSE")
                 execute_query(
@@ -347,7 +351,6 @@ class ManageRulesViolations(tk.Frame):
                   relief="flat", bd=0, padx=20, pady=8, cursor="hand2",
                   command=_submit).pack(side="left")
 
-    # ------------------------------------------------------------------
     def _edit_rule(self):
         sel = self.rule_tree.selection()
         if not sel:
@@ -431,7 +434,6 @@ class ManageRulesViolations(tk.Frame):
                   relief="flat", bd=0, padx=24, pady=8, cursor="hand2",
                   command=save).pack(pady=(6, 0))
 
-    # ------------------------------------------------------------------
     def _remove_rule(self):
         sel = self.rule_tree.selection()
         if not sel:
@@ -446,7 +448,7 @@ class ManageRulesViolations(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
-    # ------------------------------------------------------------------
+    # Issues a temporary password so the student can log in and set their own new password.
     def _open_reset_password_popup(self):
         import re
 
@@ -662,6 +664,8 @@ class ManageRulesViolations(tk.Frame):
             try:
                 conn   = get_connection()
                 cursor = conn.cursor()
+                # SHA2 here matches MySQL's native function; the student's reset uses Python hashlib.
+                # Both produce the same SHA-256 hex digest so the two can interoperate.
                 cursor.execute(
                     "UPDATE Users SET password_hash = SHA2('mypass', 256), "
                     "password_reset_required = 1 WHERE user_id = %s",

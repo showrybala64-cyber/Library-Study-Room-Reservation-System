@@ -1,3 +1,7 @@
+# Persistent header widget shown on every screen after login.
+# Displays the CMU logo, the app title, and the current user's ID/name/role.
+# Logout lives in the sidebar, not here, to keep the header read-only.
+
 import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -15,14 +19,8 @@ LOGO_WIDTH    = 200
 
 
 class AppHeader(ctk.CTkFrame):
-    """
-    Top header bar — 120px tall.
-    Left  : Black logo box, 200px wide.
-    Right : Maroon bar, fills remaining width.
-              - 'UNIVERSITY LIBRARIES' 42px bold centered.
-              - User ID / Name / Role labels at top-right (13px).
-    No logout button — logout is handled by the sidebar.
-    """
+    # Two-zone layout: black logo block on the left, maroon title bar on the right.
+    # user_info dict must contain user_id, name, and role keys.
 
     def __init__(self, parent, user_info: dict, on_logout=None, **kwargs):
         super().__init__(parent, fg_color=BLACK, corner_radius=0,
@@ -32,9 +30,8 @@ class AppHeader(ctk.CTkFrame):
         self.user_info = user_info
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
-        # ── Black logo block (200 px wide) ────────────────────────────
+        # Fixed-width black block keeps the logo from stretching when the window resizes.
         logo_block = tk.Frame(self, bg=BLACK, width=LOGO_WIDTH,
                               height=HEADER_HEIGHT)
         logo_block.pack(side="left", fill="y")
@@ -49,24 +46,24 @@ class AppHeader(ctk.CTkFrame):
                 tk.Label(logo_block, image=self._logo_img,
                          bg=BLACK, bd=0).pack(expand=True)
             except Exception:
+                # Fall back to text if the image file is corrupt or unreadable.
                 tk.Label(logo_block, text="CMU", fg=GOLD, bg=BLACK,
                          font=("Poppins", 28, "bold")).pack(expand=True)
         else:
             tk.Label(logo_block, text="CMU", fg=GOLD, bg=BLACK,
                      font=("Poppins", 28, "bold")).pack(expand=True)
 
-        # ── Maroon bar (fills remaining width) ────────────────────────
         maroon_frame = tk.Frame(self, bg=MAROON)
         maroon_frame.pack(side="left", fill="both", expand=True)
         maroon_frame.columnconfigure(0, weight=1)
-        maroon_frame.rowconfigure(0, weight=0)   # user info row
-        maroon_frame.rowconfigure(1, weight=1)   # title row
+        maroon_frame.rowconfigure(0, weight=0)
+        maroon_frame.rowconfigure(1, weight=1)
 
-        # User info — top-right (row 0)
         uid  = self.user_info.get("user_id", "")
         name = self.user_info.get("name", "")
         role = self.user_info.get("role", "").capitalize()
 
+        # User identity sits top-right so it is visible but does not compete with the title.
         info_frame = tk.Frame(maroon_frame, bg=MAROON)
         info_frame.grid(row=0, column=0, sticky="ne", padx=16, pady=(6, 0))
 
@@ -80,7 +77,6 @@ class AppHeader(ctk.CTkFrame):
                  fg=GOLD, bg=MAROON, font=("Poppins", 13, "bold")
                  ).pack(side="left")
 
-        # Title — vertically centred (row 1)
         tk.Label(maroon_frame,
                  text="UNIVERSITY LIBRARIES",
                  fg=WHITE, bg=MAROON,

@@ -1,3 +1,7 @@
+# Student profile view and edit screen.
+# Email, role, and account status are read-only; only DOB and phone number are editable.
+# Password changes are routed through the forgot-password flow for consistency.
+
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
@@ -18,7 +22,6 @@ class ProfilePage(tk.Frame):
         self.navigator = navigator
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -135,7 +138,6 @@ class ProfilePage(tk.Frame):
                   command=self._change_password
                   ).pack(side="left")
 
-    # ------------------------------------------------------------------
     def _update_profile(self):
         dob          = self.dob_entry.get().strip()
         phone_number = self.vars["phone_number"].get().strip()
@@ -148,6 +150,7 @@ class ProfilePage(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
+    # Redirecting to forgot-password avoids duplicating the password-change logic here.
     def _change_password(self):
         popup = tk.Toplevel(self)
         popup.title("Change Password")
@@ -175,8 +178,7 @@ class ProfilePage(tk.Frame):
 
         def go_forgot():
             popup.destroy()
-            # Logout clears the session and returns to the login screen,
-            # from which the user can access Forgot Password directly.
+            # logout_to_forgot clears the session; App then opens the forgot-password screen directly.
             self.navigator("logout_to_forgot")
 
         tk.Button(btn_row, text="Go to Forgot Password",

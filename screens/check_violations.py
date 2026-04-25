@@ -1,3 +1,6 @@
+# Admin violations browser with date-range filtering and inline status/notes editing.
+# Admin can resolve a violation or add notes; resolved_at is set automatically on resolve.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
@@ -22,7 +25,6 @@ class CheckViolations(tk.Frame):
         self.navigator = navigator
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -114,7 +116,7 @@ class CheckViolations(tk.Frame):
 
         self._load_all()
 
-    # ------------------------------------------------------------------
+    # Opens inline editor for status and notes; sets resolved_at when status changes to resolved.
     def _edit_violation(self):
         sel = self.tree.selection()
         if not sel:
@@ -170,9 +172,13 @@ class CheckViolations(tk.Frame):
         canvas.bind("<Configure>", _on_canvas_resize)
 
         def _on_mousewheel(e):
-            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            try:
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            except Exception:
+                pass
+        win.bind("<MouseWheel>",    _on_mousewheel)
         canvas.bind("<MouseWheel>", _on_mousewheel)
-        sf.bind("<MouseWheel>", _on_mousewheel)
+        sf.bind("<MouseWheel>",     _on_mousewheel)
 
         # Header inside scrollable frame
         tk.Label(sf, text=f"Edit Violation #{vio_id}", fg=MAROON, bg=WHITE,
@@ -244,7 +250,12 @@ class CheckViolations(tk.Frame):
                   relief="flat", bd=0, padx=20, pady=8, cursor="hand2",
                   command=_save).pack(side="left")
 
-    # ------------------------------------------------------------------
+        def _bind_scroll(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel)
+            for child in widget.winfo_children():
+                _bind_scroll(child)
+        _bind_scroll(sf)
+
     def _load_all(self):
         self._fetch(None, None)
 

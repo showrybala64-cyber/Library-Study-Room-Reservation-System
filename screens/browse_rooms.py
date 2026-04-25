@@ -1,3 +1,7 @@
+# Room browsing and reservation booking screen for students.
+# Validates nine rules before inserting: future date, same-day time, min/max duration,
+# daily 3-hour cap, personal overlap, 2-hour cooldown, active rule set, room conflict, then insert.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
@@ -38,9 +42,8 @@ CATEGORY_INFO = {
 }
 
 
+# Follows the cursor so the tooltip never obscures the button it belongs to.
 class FloatingTooltip:
-    """Professional card-style tooltip with maroon border."""
-
     def __init__(self, widget, title, body):
         self.widget = widget
         self.title  = title
@@ -95,7 +98,6 @@ class BrowseRooms(tk.Frame):
         self._room_id_map = {}
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -166,7 +168,6 @@ class BrowseRooms(tk.Frame):
 
         self._build_form(form_inner)
 
-    # ------------------------------------------------------------------
     def _build_form(self, f):
         row_pady = (0, 14)
 
@@ -223,7 +224,7 @@ class BrowseRooms(tk.Frame):
             command=self._do_reserve
         ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(16, 0))
 
-    # ------------------------------------------------------------------
+    # Highlights the selected category button and repopulates the room dropdown.
     def _select_category(self, cat_name):
         self.selected_cat = cat_name
 
@@ -265,7 +266,6 @@ class BrowseRooms(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
-    # ------------------------------------------------------------------
     def _do_reserve(self):
         if not self.selected_cat:
             messagebox.showwarning("Reserve", "Please select a room category first.")
@@ -303,7 +303,7 @@ class BrowseRooms(tk.Frame):
             )
             return
 
-        # 2. SAME-DAY BOOKING TIME VALIDATION
+        # 2. SAME-DAY BOOKING TIME VALIDATION — uses Detroit timezone since the library is local.
         if reservation_date == today:
             local_tz = pytz.timezone("America/Detroit")
             now_est = datetime.now(local_tz)
@@ -372,7 +372,7 @@ class BrowseRooms(tk.Frame):
                 )
                 return
 
-            # 6. 2-HOUR COOLDOWN AFTER CHECK-IN
+            # 6. 2-HOUR COOLDOWN AFTER CHECK-IN — MySQL TIME columns return timedelta objects.
             cooldown = execute_query(
                 "SELECT r.end_time FROM Reservations r "
                 "JOIN Check_Ins c ON c.reservation_id = r.reservation_id "
@@ -382,7 +382,6 @@ class BrowseRooms(tk.Frame):
             )
             if cooldown:
                 last_end = cooldown[0]["end_time"]
-                # end_time from DB is a timedelta; convert to datetime for comparison
                 if hasattr(last_end, "seconds"):
                     last_end_dt = datetime.combine(
                         date.today(),
@@ -401,7 +400,7 @@ class BrowseRooms(tk.Frame):
                     )
                     return
 
-            # 7. FETCH ACTIVE RULE SET
+            # 7. FETCH ACTIVE RULE SET  (needed before both conflict check and insert)
             rule_result = execute_query(
                 "SELECT rule_set_id FROM Rules WHERE is_active = 1 "
                 "ORDER BY rule_set_id DESC LIMIT 1",
@@ -412,7 +411,24 @@ class BrowseRooms(tk.Frame):
                 return
             rule_set_id = rule_result[0]["rule_set_id"]
 
-            # 8. INSERT RESERVATION
+            # 8. ROOM CONFLICT CHECK (blocks double-booking by any student)
+            room_number = room_str.split(" - ")[0]
+            conflict = execute_query(
+                "SELECT COUNT(*) AS conflict_count FROM Reservations "
+                "WHERE room_id = %s AND reservation_date = %s "
+                "AND status NOT IN ('cancelled', 'no_show') "
+                "AND start_time < %s AND end_time > %s",
+                (room_id, date_str, end_str, start_str), fetch=True
+            )
+            if conflict and int(conflict[0]["conflict_count"]) > 0:
+                messagebox.showerror(
+                    "Room Not Available",
+                    f"Room {room_number} is not available from {start_str} to {end_str} "
+                    f"on {date_str}. Please choose a different time or room."
+                )
+                return
+
+            # 9. INSERT RESERVATION
             execute_query(
                 """INSERT INTO Reservations
                    (user_id, room_id, reservation_date, start_time, end_time, status, rule_set_id)

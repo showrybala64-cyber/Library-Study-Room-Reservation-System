@@ -1,3 +1,8 @@
+# Self-service password reset used by two flows: standard forgot-password and
+# the forced reset after an admin issues a temporary password.
+# temp_mode=True shows a banner and pre-fills the email so the user cannot change it.
+# On success, passes the email back to login so the field is pre-filled.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
@@ -15,6 +20,7 @@ CREAM   = "#FFF8E7"
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
 
+# SHA-256 must match the hashing used in login and signup.
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -27,7 +33,6 @@ class ForgotPasswordScreen(tk.Frame):
         self._temp_mode    = temp_mode
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -108,7 +113,7 @@ class ForgotPasswordScreen(tk.Frame):
             entry.grid(row=row, column=0, sticky="ew", padx=30, pady=(2, 0))
             entry.bind("<MouseWheel>", _on_wheel)
 
-        # Temp-mode banner (row -1, packed before grid rows)
+        # In temp_mode the banner instructs the user to enter 'mypass' as the current password.
         if self._temp_mode:
             banner = tk.Frame(form, bg="#FFF3CD", relief="flat", bd=0)
             banner.grid(row=0, column=0, sticky="ew", padx=30, pady=(14, 0))
@@ -177,7 +182,7 @@ class ForgotPasswordScreen(tk.Frame):
         self._fp_match_lbl.grid(row=r + 8, column=0, sticky="w", padx=30)
         self._fp_match_lbl.bind("<MouseWheel>", _on_wheel)
 
-        # Bind traces
+        # Update checklist on every keystroke for immediate feedback.
         new_var.trace_add("write", lambda *_: self._update_fp_checker())
         confirm_var.trace_add("write", lambda *_: self._update_fp_checker())
 
@@ -207,7 +212,7 @@ class ForgotPasswordScreen(tk.Frame):
         back_lbl.bind("<Button-1>", lambda e: self.on_login())
         back_lbl.bind("<MouseWheel>", _on_wheel)
 
-    # ------------------------------------------------------------------
+    # Mirrors the same live-checker logic from signup so rules look consistent across screens.
     def _update_fp_checker(self):
         p = self.vars["new_pass"].get()
         _RULE_TEXT = {
@@ -239,9 +244,8 @@ class ForgotPasswordScreen(tk.Frame):
         else:
             self._fp_match_lbl.config(text="\u2717 Passwords do not match", fg="#CC0000")
 
-    # ------------------------------------------------------------------
+    # Password CTkEntry with place()-overlaid eye toggle; wheel_cb keeps mousewheel scrolling working.
     def _pw_field(self, parent, grid_row, var, wheel_cb=None):
-        """Password CTkEntry with place()-overlaid eye toggle."""
         pw_ctk = ctk.CTkEntry(parent, textvariable=var,
                                show="•", height=42, corner_radius=8,
                                border_color=MAROON, border_width=2,
@@ -272,7 +276,6 @@ class ForgotPasswordScreen(tk.Frame):
 
         parent.after(100, _place_eye)
 
-    # ------------------------------------------------------------------
     def _do_reset(self):
         v = {k: var.get().strip() for k, var in self.vars.items()}
 
@@ -311,6 +314,7 @@ class ForgotPasswordScreen(tk.Frame):
         hashed_new = _sha256(v["new_pass"])
 
         try:
+            # Verify the current/temporary password before allowing the update.
             rows = execute_query(
                 "SELECT user_id FROM Users WHERE email = %s AND password_hash = %s",
                 (v["email"], hashed_old), fetch=True
@@ -319,6 +323,7 @@ class ForgotPasswordScreen(tk.Frame):
                 messagebox.showerror("Reset", "Incorrect current/temporary password.")
                 return
 
+            # Clear password_reset_required so the temp-password gate does not trigger again.
             execute_query(
                 "UPDATE Users SET password_hash = %s, password_reset_required = 0 "
                 "WHERE email = %s",
@@ -328,6 +333,7 @@ class ForgotPasswordScreen(tk.Frame):
                 "Reset",
                 "Password updated successfully. Please login with your new password."
             )
-            self.on_login()
+            # Pass email so the login screen can pre-fill it without the user retyping.
+            self.on_login(v["email"])
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))

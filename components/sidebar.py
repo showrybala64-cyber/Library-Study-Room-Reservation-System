@@ -1,3 +1,7 @@
+# Navigation sidebar shared by every post-login screen.
+# Callers pass nav_items as (label, command) tuples; "Logout" is detected by name
+# and pinned to the bottom so it never scrolls out of view.
+
 import tkinter as tk
 import customtkinter as ctk
 import webbrowser
@@ -22,11 +26,7 @@ MAPS_URL = "https://maps.google.com/?q=250+E+Preston+Mt+Pleasant+MI+48859"
 
 
 class AppSidebar(ctk.CTkFrame):
-    """
-    Gold left sidebar — 200px wide, full screen height.
-    nav_items : list of (label, command) tuples; last item must be 'Logout'.
-    active    : label of currently active screen (highlighted in maroon).
-    """
+    # active label is compared case-insensitively to highlight the current screen.
 
     def __init__(self, parent, nav_items: list, active: str = "", **kwargs):
         super().__init__(parent, fg_color=GOLD, corner_radius=0,
@@ -35,9 +35,8 @@ class AppSidebar(ctk.CTkFrame):
         self.grid_propagate(False)
         self._build(nav_items, active)
 
-    # ------------------------------------------------------------------
     def _build(self, nav_items, active):
-        # Separate logout from the rest
+        # Pull logout out of the list so it can be pinned regardless of order in nav_items.
         logout_item = None
         main_items  = []
         for label, cmd in nav_items:
@@ -46,7 +45,6 @@ class AppSidebar(ctk.CTkFrame):
             else:
                 main_items.append((label, cmd))
 
-        # ── Top nav buttons ───────────────────────────────────────────
         nav_frame = tk.Frame(self, bg=GOLD)
         nav_frame.pack(fill="x", padx=10, pady=(16, 0))
 
@@ -55,6 +53,7 @@ class AppSidebar(ctk.CTkFrame):
             is_active = label.strip().lower() == active.strip().lower()
             display = LABEL_MAP.get(label, label)
             long_label = "\n" in display
+            # Active button inverts to gold/maroon to show current location.
             ctk.CTkButton(
                 nav_frame,
                 text=display,
@@ -71,10 +70,9 @@ class AppSidebar(ctk.CTkFrame):
                 anchor="w",
             ).pack(pady=(0, BTN_SPACING))
 
-        # ── Spacer ────────────────────────────────────────────────────
+        # Flexible spacer pushes logout and address to the bottom of the sidebar.
         tk.Frame(self, bg=GOLD).pack(fill="both", expand=True)
 
-        # ── Logout button at bottom ───────────────────────────────────
         if logout_item:
             bottom_frame = tk.Frame(self, bg=GOLD)
             bottom_frame.pack(fill="x", padx=10, pady=(0, 8))
@@ -94,7 +92,6 @@ class AppSidebar(ctk.CTkFrame):
                 anchor="w",
             ).pack()
 
-        # ── Address at very bottom ────────────────────────────────────
         tk.Label(self,
                  text="For directions to\nCharles V. Park Library\nclick below:",
                  fg=DARK_BORDER, bg=GOLD,
@@ -102,6 +99,7 @@ class AppSidebar(ctk.CTkFrame):
                  justify="center"
                  ).pack(fill="x", padx=10, pady=(0, 2))
 
+        # Clickable address opens Google Maps in the default browser.
         addr_btn = tk.Button(
             self,
             text=ADDRESS,

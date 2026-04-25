@@ -1,3 +1,6 @@
+# Admin report generation screen: Room Usage, Student Usage & Penalty, and Violations.
+# Supports four export formats (txt, csv, xlsx, pdf); openpyxl and reportlab are optional.
+
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import customtkinter as ctk
@@ -7,6 +10,7 @@ from connect_db import execute_query
 
 from components.date_picker import make_date_entry
 
+# Optional; xlsx export is disabled with a clear error message if not installed.
 try:
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -14,6 +18,7 @@ try:
 except ImportError:
     _XLSX = False
 
+# Optional; pdf export is disabled with a clear error message if not installed.
 try:
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.lib import colors
@@ -85,7 +90,6 @@ class Reports(tk.Frame):
         self.current_date_range  = ("", "")
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -171,7 +175,6 @@ class Reports(tk.Frame):
         self.result_text.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
 
-    # ------------------------------------------------------------------
     def _load_rooms(self):
         try:
             rows = execute_query("SELECT room_number FROM Rooms ORDER BY room_number",
@@ -187,12 +190,14 @@ class Reports(tk.Frame):
         self.result_text.insert("end", text)
         self.result_text.config(state="disabled")
 
+    # Saves report data and enables Download so the user can export what they just previewed.
     def _store_report(self, rtype, from_date, to_date, rows):
         self.current_report_data = rows
         self.current_report_type = rtype
         self.current_date_range  = (from_date, to_date)
         self._dl_btn.config(state="normal")
 
+    # Collects metadata shown in the header block of every export format.
     def _get_header_info(self):
         from_date, to_date = self.current_date_range
         name = self.user_info.get("name", "Unknown")
@@ -207,7 +212,7 @@ class Reports(tk.Frame):
             "date_range":    f"{from_date} to {to_date}",
         }
 
-    # ------------------------------------------------------------------
+    # Dispatches to the report-specific method based on the selected report type.
     def _generate(self):
         rtype     = self.rtype_var.get()
         room_filt = self.room_var.get()
@@ -227,7 +232,7 @@ class Reports(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Report Error", str(exc))
 
-    # ------------------------------------------------------------------
+    # LEFT JOIN ensures rooms with zero reservations in the period still appear in the report.
     def _room_usage(self, room_filt, from_date, to_date):
         params = [from_date, to_date]
         extra  = ""
@@ -279,6 +284,7 @@ class Reports(tk.Frame):
         self._set_result("\n".join(lines))
         self._store_report("Room Usage Report", from_date, to_date, rows)
 
+    # Ordered by penalty_points DESC so high-risk students surface at the top.
     def _student_usage(self, from_date, to_date):
         rows = execute_query(
             """SELECT u.user_id, u.first_name, u.last_name, u.email,
@@ -346,6 +352,7 @@ class Reports(tk.Frame):
             self._set_result("No violations found for the selected range.")
             return
 
+        # Summary line gives a quick picture of total policy impact across the period.
         total_pts = sum(r["points_assessed"] or 0 for r in rows)
         lines = [
             f"VIOLATIONS REPORT  |  {from_date}  to  {to_date}",
@@ -369,9 +376,7 @@ class Reports(tk.Frame):
         self._set_result("\n".join(lines))
         self._store_report("Violations Report", from_date, to_date, rows)
 
-    # ------------------------------------------------------------------
-    # Download popup
-    # ------------------------------------------------------------------
+    # Opens format picker so user chooses txt, csv, xlsx, or pdf before committing to a file path.
     def _open_download_popup(self):
         from_date, to_date = self.current_date_range
         rtype = self.current_report_type
@@ -424,18 +429,14 @@ class Reports(tk.Frame):
             command=popup.destroy,
         ).pack(pady=(0, 16))
 
-    # ------------------------------------------------------------------
-    # Shared helpers
-    # ------------------------------------------------------------------
+    # Stamped with user ID and timestamp so repeated downloads never collide.
     def _build_filename(self, ext):
         stem = FILENAME_MAP.get(self.current_report_type, "Report")
         uid  = self.user_info.get("user_id", 0)
         ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{stem}_{uid}_{ts}.{ext}"
 
-    # ------------------------------------------------------------------
-    # Download: TXT
-    # ------------------------------------------------------------------
+    # Plain text: reuses the preview widget content verbatim with a metadata header prepended.
     def _download_txt(self, popup):
         default = self._build_filename("txt")
         path = filedialog.asksaveasfilename(
@@ -473,9 +474,7 @@ class Reports(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Save Error", str(exc))
 
-    # ------------------------------------------------------------------
-    # Download: CSV
-    # ------------------------------------------------------------------
+    # CSV: writes metadata rows then column headers and data rows for easy spreadsheet import.
     def _download_csv(self, popup):
         default = self._build_filename("csv")
         path = filedialog.asksaveasfilename(
@@ -510,9 +509,7 @@ class Reports(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Save Error", str(exc))
 
-    # ------------------------------------------------------------------
-    # Download: XLSX
-    # ------------------------------------------------------------------
+    # Excel: styled workbook with maroon header row, alternating row fills, and auto-fit columns.
     def _download_xlsx(self, popup):
         if not _XLSX:
             messagebox.showerror(
@@ -594,7 +591,7 @@ class Reports(tk.Frame):
                     cell.font      = data_font
                     cell.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Auto-fit column widths
+            # Cap at 40 chars so wide text columns don't make the sheet unusable.
             for col in ws.columns:
                 max_len = max(len(str(cell.value or "")) for cell in col)
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
@@ -605,9 +602,7 @@ class Reports(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Save Error", str(exc))
 
-    # ------------------------------------------------------------------
-    # Download: PDF
-    # ------------------------------------------------------------------
+    # PDF: landscape orientation keeps wide tables readable without truncation.
     def _download_pdf(self, popup):
         if not _PDF:
             messagebox.showerror(

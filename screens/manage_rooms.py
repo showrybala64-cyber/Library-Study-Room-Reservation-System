@@ -1,3 +1,7 @@
+# Admin room management screen: add, edit status, or flag a room for maintenance.
+# Stat cards always show global counts (full table), never filtered counts,
+# so they remain meaningful when the filter dropdown narrows the table view.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
@@ -19,7 +23,6 @@ class ManageRooms(tk.Frame):
         self.navigator = navigator
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -56,11 +59,11 @@ class ManageRooms(tk.Frame):
         # Action buttons
         btn_row = tk.Frame(content, bg=WHITE)
         btn_row.grid(row=2, column=0, sticky="w", pady=(14, 8))
+        self._all_rooms = []
         for label, cmd in [
             ("Add Room",          self._add_room),
             ("Edit Room",         self._edit_room),
             ("Under Maintenance", self._maintenance_room),
-            ("Search Room",       self._search_room),
             ("Refresh",           self._load_data),
         ]:
             tk.Button(btn_row, text=label,
@@ -69,12 +72,16 @@ class ManageRooms(tk.Frame):
                       relief="flat", bd=0, padx=14, pady=7, cursor="hand2",
                       command=cmd
                       ).pack(side="left", padx=(0, 8))
-        tk.Button(btn_row, text="Delete Room",
-                  fg=WHITE, bg="#8B0000",
-                  font=("Poppins", 12, "bold"),
-                  relief="flat", bd=0, padx=14, pady=7, cursor="hand2",
-                  command=self._delete_room
-                  ).pack(side="left", padx=(0, 8))
+
+        tk.Label(btn_row, text="Filter Room:", fg=MAROON, bg=WHITE,
+                 font=("Poppins", 12, "bold")).pack(side="left", padx=(12, 6))
+        self._filter_var = tk.StringVar(value="All Rooms")
+        self._filter_cb = ttk.Combobox(btn_row, textvariable=self._filter_var,
+                                        state="normal", width=30,
+                                        font=("Poppins", 11))
+        self._filter_cb.pack(side="left")
+        self._filter_cb.bind("<KeyRelease>", self._on_filter_key)
+        self._filter_cb.bind("<<ComboboxSelected>>", self._on_filter_select)
 
         # Treeview
         tree_frame = tk.Frame(content, bg=WHITE)
@@ -118,27 +125,39 @@ class ManageRooms(tk.Frame):
 
         self._load_data()
 
-    # ------------------------------------------------------------------
-    def _load_data(self, search_term=None):
+    # Always queries the full Rooms table so stats are never affected by the filter dropdown.
+    def _load_stats(self):
+        try:
+            res = execute_query(
+                """SELECT
+                     COUNT(*) AS total,
+                     SUM(status = 'available')   AS avail,
+                     SUM(status = 'maintenance') AS maint
+                   FROM Rooms""",
+                fetch=True
+            )
+            row = res[0] if res else {}
+            self._stats_labels["Total Rooms"].config(text=str(row.get("total", 0) or 0))
+            self._stats_labels["Available"].config(text=str(row.get("avail", 0) or 0))
+            self._stats_labels["Under Maintenance"].config(text=str(row.get("maint", 0) or 0))
+        except Exception as exc:
+            messagebox.showerror("Database Error", str(exc))
+
+    def _load_data(self, room_id=None):
         for row in self.tree.get_children():
             self.tree.delete(row)
         try:
-            if search_term:
+            if room_id:
                 rows = execute_query(
-                    "SELECT room_id, room_number, room_category, capacity, status FROM Rooms WHERE room_number LIKE %s",
-                    (f"%{search_term}%",), fetch=True
+                    "SELECT room_id, room_number, room_category, capacity, status FROM Rooms WHERE room_id = %s",
+                    (room_id,), fetch=True
                 )
             else:
                 rows = execute_query(
                     "SELECT room_id, room_number, room_category, capacity, status FROM Rooms ORDER BY room_id",
                     fetch=True
                 )
-            total = len(rows)
-            avail = sum(1 for r in rows if r["status"] == "available")
-            maint = sum(1 for r in rows if r["status"] == "maintenance")
-            self._stats_labels["Total Rooms"].config(text=str(total))
-            self._stats_labels["Available"].config(text=str(avail))
-            self._stats_labels["Under Maintenance"].config(text=str(maint))
+                self._load_stats()
 
             for i, row in enumerate(rows):
                 tag = "evenrow" if i % 2 == 0 else "oddrow"
@@ -148,8 +167,9 @@ class ManageRooms(tk.Frame):
                 ), tags=(tag,))
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
+        self._load_room_filter()
 
-    # ------------------------------------------------------------------
+    # Popup with predefined room list per category; custom mode lets admin enter any room number.
     def _add_room(self):
         PREDEFINED = {
             "Projector Room": [
@@ -247,7 +267,7 @@ class ManageRooms(tk.Frame):
             e.bind("<MouseWheel>", _wh)
             return e
 
-        # ── Mode flag ───────────────────────────────────────────────────
+        # List used as mutable container so inner closures can toggle between predefined and custom modes.
         _custom = [False]
 
         # ── StringVars ──────────────────────────────────────────────────
@@ -336,6 +356,7 @@ class ManageRooms(tk.Frame):
             cat = cat_var.get()
             all_rooms = PREDEFINED.get(cat, [])
             try:
+                # Filter out rooms already in the DB so only genuinely new options appear.
                 existing = execute_query("SELECT room_code FROM Rooms", fetch=True)
                 existing_codes = {r["room_code"] for r in (existing or [])}
             except Exception:
@@ -421,7 +442,8 @@ class ManageRooms(tk.Frame):
                 messagebox.showwarning("Add Room", "Capacity and Floor Number must be integers.", parent=win)
                 return
 
-            db_cat = cat  # DB CHECK constraint: exact strings required
+            # room_category must match the exact string used in the CHECK constraint.
+            db_cat = cat
             name   = name_var.get().strip() or f"{cat} {rnum}"
             if not code:
                 code = f"{PREFIX_MAP.get(cat, 'X')}-{rnum}"
@@ -513,7 +535,7 @@ class ManageRooms(tk.Frame):
                   relief="flat", bd=0, padx=16, pady=7, cursor="hand2",
                   command=_confirm).pack(side="left")
 
-    # ------------------------------------------------------------------
+    # Only status is editable on the edit form; other fields are shown read-only for reference.
     def _edit_room(self):
         sel = self.tree.selection()
         if not sel:
@@ -632,62 +654,46 @@ class ManageRooms(tk.Frame):
                   relief="flat", bd=0, padx=20, pady=8, cursor="hand2",
                   command=_save).pack(side="left")
 
-    # ------------------------------------------------------------------
-    def _delete_room(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showwarning("Delete Room", "Select a room first.")
-            return
-        vals     = self.tree.item(sel[0])["values"]
-        room_id  = vals[0]
-        room_num = vals[1]
-
-        if not messagebox.askyesno(
-            "Delete Room",
-            f"Permanently delete Room {room_num}?\nThis cannot be undone."
-        ):
-            return
+    # Repopulates the filter combobox after every data load so new rooms appear immediately.
+    def _load_room_filter(self):
         try:
-            result = execute_query(
-                "SELECT COUNT(*) AS cnt FROM Reservations "
-                "WHERE room_id = %s AND status IN ('reserved', 'checked_in')",
-                (room_id,), fetch=True
+            rows = execute_query(
+                "SELECT room_id, room_number, room_name, room_category FROM Rooms ORDER BY room_number",
+                fetch=True
             )
-            active = result[0]["cnt"] if result else 0
-            if active > 0:
-                messagebox.showerror(
-                    "Cannot Delete",
-                    f"Room {room_num} has {active} active reservation(s).\n"
-                    "Cancel those reservations before deleting."
-                )
-                return
-            execute_query("DELETE FROM Rooms WHERE room_id = %s", (room_id,))
+            self._all_rooms = rows or []
+        except Exception:
+            self._all_rooms = []
+        options = ["All Rooms"] + [
+            f"{r['room_number']} - {r['room_name']}" for r in self._all_rooms
+        ]
+        self._filter_cb["values"] = options
+        if self._filter_var.get() not in options:
+            self._filter_var.set("All Rooms")
+
+    def _on_filter_key(self, event):
+        typed = self._filter_var.get().lower()
+        if not typed:
+            self._filter_cb["values"] = ["All Rooms"] + [
+                f"{r['room_number']} - {r['room_name']}" for r in self._all_rooms
+            ]
+            return
+        matches = [
+            f"{r['room_number']} - {r['room_name']}"
+            for r in self._all_rooms
+            if r["room_number"].lower().startswith(typed)
+            or r["room_name"].lower().startswith(typed)
+        ]
+        self._filter_cb["values"] = matches if matches else ["All Rooms"]
+
+    def _on_filter_select(self, event):
+        selected = self._filter_var.get()
+        if not selected or selected == "All Rooms":
             self._load_data()
-        except Exception as exc:
-            messagebox.showerror("Database Error", str(exc))
-
-    def _search_room(self):
-        win = tk.Toplevel(self)
-        win.title("Search Room")
-        win.geometry("300x140")
-        win.resizable(False, False)
-        win.configure(bg=WHITE)
-        win.grab_set()
-
-        tk.Label(win, text="Room Number:", fg=BLACK, bg=WHITE,
-                 font=("Poppins", 12)).pack(pady=(20, 4))
-        var = tk.StringVar()
-        ctk.CTkEntry(win, textvariable=var, height=34, corner_radius=6,
-                     border_color=MAROON, border_width=1,
-                     fg_color=WHITE, text_color=BLACK,
-                     font=("Poppins", 12)
-                     ).pack(fill="x", padx=30, pady=(0, 10))
-
-        def do_search():
-            win.destroy()
-            self._load_data(var.get().strip())
-
-        tk.Button(win, text="SEARCH", fg=WHITE, bg=MAROON,
-                  font=("Poppins", 13, "bold"),
-                  relief="flat", bd=0, padx=20, pady=8, cursor="hand2",
-                  command=do_search).pack()
+            return
+        room_number = selected.split(" - ")[0].strip()
+        match = next((r for r in self._all_rooms if r["room_number"] == room_number), None)
+        if match:
+            self._load_data(room_id=match["room_id"])
+        else:
+            self._load_data()

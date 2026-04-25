@@ -1,12 +1,12 @@
-"""
-Reusable custom date picker that avoids the tkcalendar DateEntry
-double-click-close bug on Windows.
-
-Usage:
-    frame = make_date_entry(parent, default_date="2025-01-01")
-    frame.pack(side="left", ...)   # or .grid(...)
-    date_str = frame.get()         # returns "YYYY-MM-DD" text
-"""
+# Custom date picker that avoids the tkcalendar DateEntry double-click-close bug on Windows.
+# tkcalendar's DateEntry widget closes immediately on the second click on Windows because
+# the click-outside handler fires before the selection registers. This replacement uses
+# a plain Toplevel popup so click handling is under our control.
+#
+# Usage:
+#   frame = make_date_entry(parent, default_date="2025-01-01")
+#   frame.pack(side="left", ...)
+#   date_str = frame.get()   # returns "YYYY-MM-DD"
 
 import tkinter as tk
 from tkinter import ttk
@@ -19,18 +19,8 @@ WHITE  = "#FFFFFF"
 BLACK  = "#000000"
 
 
+# Returns a tk.Frame with .get() and .entry attributes so callers treat it like an entry widget.
 def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
-    """
-    Returns a tk.Frame containing:
-      - A CTkEntry (YYYY-MM-DD text, fully editable)
-      - A small calendar-icon button that opens a popup Calendar
-
-    The returned frame has:
-      .get()  — reads the entry text
-      .entry  — direct reference to the CTkEntry widget
-
-    Any extra kwargs are passed to tk.Frame (bg, etc.).
-    """
     bg = kwargs.pop("bg", WHITE)
     frame = tk.Frame(parent, bg=bg, **kwargs)
 
@@ -52,10 +42,11 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
         entry.delete(0, "end")
         entry.insert(0, str(default_date))
 
-    _popup = [None]  # mutable ref so inner closures can reassign
+    # List used as a mutable container so inner closures can replace the reference.
+    _popup = [None]
 
     def open_calendar():
-        # Toggle: click button again to close
+        # Second click on the icon closes the popup rather than opening a second one.
         if _popup[0] is not None:
             try:
                 _popup[0].destroy()
@@ -69,6 +60,7 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
         top.attributes("-topmost", True)
         _popup[0] = top
 
+        # Position the popup directly below the entry field.
         entry.update_idletasks()
         x = entry.winfo_rootx()
         y = entry.winfo_rooty() + entry.winfo_height()
@@ -90,7 +82,7 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
         )
         cal.pack(padx=5, pady=5)
 
-        # Pre-select whatever is already typed
+        # Sync the calendar highlight with whatever the user typed before opening.
         cur = entry.get().strip()
         if cur:
             try:
@@ -117,7 +109,7 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
             command=on_select,
         ).pack(fill="x", padx=5, pady=(0, 5))
 
-        # Close when clicking outside the popup
+        # Bind to the root window so clicks anywhere outside the popup dismiss it.
         def close_on_outside(event):
             try:
                 if top.winfo_exists():
@@ -143,7 +135,7 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
         command=open_calendar,
     ).pack(side="left", padx=(3, 0))
 
-    # Expose .get() and .entry for callers
+    # Attach .get() and .entry so callers can treat the frame like a plain entry widget.
     frame.get   = entry.get
     frame.entry = entry
 

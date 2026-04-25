@@ -1,3 +1,7 @@
+# Student reservation management: list, check-in, and cancel.
+# Check-in and cancel both read the active Rules row to enforce the grace and cutoff minutes
+# configured by admin rather than hardcoding policy values.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
@@ -20,7 +24,6 @@ class Reservations(tk.Frame):
         self.navigator = navigator
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -42,7 +45,6 @@ class Reservations(tk.Frame):
             ("Refresh",             self._load_data),
             ("Check-In",            self._check_in),
             ("Cancel Reservation",  self._cancel),
-            ("Manage Reservation",  self._manage),
         ]:
             tk.Button(
                 btn_row, text=label,
@@ -94,7 +96,6 @@ class Reservations(tk.Frame):
 
         self._load_data()
 
-    # ------------------------------------------------------------------
     def _load_data(self):
         for row in self.tree.get_children():
             self.tree.delete(row)
@@ -122,7 +123,7 @@ class Reservations(tk.Frame):
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
-    # ------------------------------------------------------------------
+    # Returns the reservation_id from the selected tree row, or None with a warning.
     def _selected_id(self):
         sel = self.tree.selection()
         if not sel:
@@ -135,6 +136,7 @@ class Reservations(tk.Frame):
         if res_id is None:
             return
         try:
+            # Grace period is policy-driven; fall back to 15 min if no active rule set exists.
             rules = execute_query(
                 "SELECT checkin_grace_minutes FROM Rules WHERE is_active = TRUE ORDER BY rule_set_id DESC LIMIT 1",
                 fetch=True
@@ -220,7 +222,7 @@ class Reservations(tk.Frame):
             now = datetime.now()
 
             if now > cutoff_dt:
-                # Late cancel – create violation
+                # Cancel after cutoff triggers a violation; points are read from active Rules.
                 execute_query(
                     """INSERT INTO Violations (user_id, reservation_id, violation_type, points_assessed, status)
                        SELECT r.user_id, %s, 'late_cancel',

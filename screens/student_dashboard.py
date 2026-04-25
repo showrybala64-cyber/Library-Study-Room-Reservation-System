@@ -1,6 +1,10 @@
+# Student dashboard with stat cards and embedded matplotlib charts.
+# Agg backend is required because matplotlib is driven from a background thread context
+# in some environments; using Agg prevents a "cannot call into Tcl from non-main thread" error.
+
 import tkinter as tk
 from tkinter import ttk
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import matplotlib
 matplotlib.use('Agg')
@@ -21,8 +25,9 @@ ORANGE     = "#e67e22"
 RED        = "#e74c3c"
 
 
+# MySQL TIME columns come back as timedelta objects, not strings.
 def _time_to_hours(t):
-    if hasattr(t, "seconds"):   # timedelta from MySQL
+    if hasattr(t, "seconds"):
         return t.seconds / 3600
     parts = str(t).split(":")
     return int(parts[0]) + int(parts[1]) / 60
@@ -38,12 +43,8 @@ class StudentDashboard(tk.Frame):
         self._line_widget     = None
         self._timeline_widget = None
         self._charts_frame    = None
-        self._week_options    = []
         self._build()
 
-    # ------------------------------------------------------------------
-    # Scrollable shell
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -62,7 +63,8 @@ class StudentDashboard(tk.Frame):
         self._scroll_frame.bind("<Configure>", self._on_frame_configure)
         self._canvas.bind("<Configure>",       self._on_canvas_configure)
 
-        # Bind Enter/Leave so mousewheel works whenever cursor is over dashboard
+        # Mousewheel is captured only while the cursor is over the canvas to avoid
+        # interfering with comboboxes or other scrollable widgets on the same screen.
         self._canvas.bind("<Enter>", self._on_canvas_enter)
         self._canvas.bind("<Leave>", self._on_canvas_leave)
 
@@ -94,9 +96,6 @@ class StudentDashboard(tk.Frame):
         for child in widget.winfo_children():
             self._bind_mousewheel_recursive(child)
 
-    # ------------------------------------------------------------------
-    # Main content
-    # ------------------------------------------------------------------
     def _build_content(self):
         sf = self._scroll_frame
         sf.columnconfigure(0, weight=1)
@@ -119,7 +118,7 @@ class StudentDashboard(tk.Frame):
         filter_frame.grid(row=3, column=0, sticky="ew", padx=30, pady=(0, 18))
         self._build_filter_panel(filter_frame)
 
-        # Charts area – rebuilt on every Apply/Reset
+        # Charts are in a separate frame so they can be destroyed and rebuilt when filters change.
         self._rebuild_charts()
 
         upcoming_frame = tk.Frame(sf, bg=WHITE)
@@ -128,9 +127,8 @@ class StudentDashboard(tk.Frame):
         self._upcoming_frame = upcoming_frame
         self._build_upcoming()
 
-    # ------------------------------------------------------------------
-    # Rebuild charts frame (called on load + every Apply/Reset)
-    # ------------------------------------------------------------------
+    # Tears down old chart widgets and redraws with current filter state.
+    # Destroying and recreating is simpler than trying to update figures in place.
     def _rebuild_charts(self):
         if self._charts_frame is not None:
             self._charts_frame.destroy()
@@ -161,15 +159,12 @@ class StudentDashboard(tk.Frame):
         self._draw_bar_chart()
         self._draw_line_chart()
 
-        # Timeline chart only when a specific room is selected
+        # The Gantt timeline only makes sense when a single room is selected.
         if room != "All Rooms":
             self._timeline_frame = tk.Frame(charts_frame, bg=WHITE, relief="groove", bd=1)
             self._timeline_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
             self._draw_timeline_chart(room)
 
-    # ------------------------------------------------------------------
-    # Stat cards
-    # ------------------------------------------------------------------
     def _build_stat_cards(self, cf):
         for i in range(4):
             cf.columnconfigure(i, weight=1, uniform="card")
@@ -187,6 +182,7 @@ class StudentDashboard(tk.Frame):
             violations = 0
 
         try:
+            # Visits This Week uses the Monday-to-Sunday window of the current calendar week.
             r = execute_query(
                 """SELECT COUNT(*) as cnt FROM Reservations
                    WHERE user_id=%s
@@ -217,6 +213,7 @@ class StudentDashboard(tk.Frame):
         self._make_card(cf, 0, str(violations), "My Violations",    GOLD,   MAROON)
         self._make_card(cf, 1, str(visits),      "Visits This Week", GOLD,   MAROON)
 
+        # Penalty card colour escalates: green (safe) -> orange (warning) -> red (danger).
         if pts <= 4:
             c3_bg, c3_fg, c3_label = GREEN,  WHITE, "Penalty Points"
         elif pts <= 9:
@@ -256,9 +253,6 @@ class StudentDashboard(tk.Frame):
                      font=("Poppins", 9),
                      wraplength=130, justify="center").pack()
 
-    # ------------------------------------------------------------------
-    # Filter panel
-    # ------------------------------------------------------------------
     def _build_filter_panel(self, ff):
         tk.Label(ff, text="Room:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 11)).grid(row=0, column=0, padx=(0, 4))
@@ -278,13 +272,15 @@ class StudentDashboard(tk.Frame):
                     "Thursday", "Friday", "Saturday", "Sunday"]
         ).grid(row=0, column=3, padx=(0, 14))
 
-        tk.Label(ff, text="Week:", fg=BLACK, bg=WHITE,
+        tk.Label(ff, text="Month:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 11)).grid(row=0, column=4, padx=(0, 4))
-        self._week_var   = tk.StringVar(value="All Weeks")
-        self._week_combo = ttk.Combobox(ff, textvariable=self._week_var,
-                                        state="readonly", width=16, font=("Poppins", 11))
-        self._week_combo.grid(row=0, column=5, padx=(0, 14))
-        self._load_week_options()
+        self._month_var = tk.StringVar(value="All Months")
+        ttk.Combobox(
+            ff, textvariable=self._month_var, state="readonly", width=16,
+            font=("Poppins", 11),
+            values=["All Months", "January 2026", "February 2026",
+                    "March 2026", "April 2026"]
+        ).grid(row=0, column=5, padx=(0, 14))
 
         tk.Button(ff, text="Apply", fg=WHITE, bg=MAROON,
                   font=("Poppins", 11, "bold"), relief="flat", bd=0,
@@ -308,35 +304,14 @@ class StudentDashboard(tk.Frame):
             values = ["All Rooms"]
         self._room_combo["values"] = values
 
-    def _load_week_options(self):
-        try:
-            rows = execute_query(
-                """SELECT DISTINCT DATE_FORMAT(reservation_date, '%Y-W%u') as week_label,
-                          MIN(reservation_date) as week_start
-                   FROM Reservations
-                   WHERE user_id=%s
-                   GROUP BY DATE_FORMAT(reservation_date, '%Y-W%u')
-                   ORDER BY week_start DESC
-                   LIMIT 12""",
-                (self._uid,), fetch=True
-            )
-            self._week_options = []
-            for r in rows:
-                ws = r["week_start"]
-                dt = ws if hasattr(ws, "strftime") else datetime.strptime(str(ws), "%Y-%m-%d")
-                display = f"Week of {dt.strftime('%b %d')}"
-                self._week_options.append((display, dt.strftime("%Y-%m-%d")))
-            values = ["All Weeks"] + [opt[0] for opt in self._week_options]
-        except Exception:
-            values = ["All Weeks"]
-            self._week_options = []
-        self._week_combo["values"] = values
-
-    def _get_week_start(self, display_label):
-        for label, ws in self._week_options:
-            if label == display_label:
-                return ws
-        return None
+    def _parse_month(self, month_str):
+        month_map = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4,
+            'May': 5, 'June': 6, 'July': 7, 'August': 8,
+            'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
+        parts = month_str.split()
+        return month_map[parts[0]], int(parts[1])
 
     def _apply_filters(self):
         self._rebuild_charts()
@@ -344,20 +319,18 @@ class StudentDashboard(tk.Frame):
     def _reset_filters(self):
         self._room_var.set("All Rooms")
         self._day_var.set("All Days")
-        self._week_var.set("All Weeks")
+        self._month_var.set("All Months")
         self._rebuild_charts()
 
-    # ------------------------------------------------------------------
-    # Chart 1 – Most Booked Rooms (bar)
-    # ------------------------------------------------------------------
+    # Shows all students' bookings per room so a student can see which rooms are most popular.
     def _draw_bar_chart(self):
         if self._bar_widget:
             self._bar_widget.get_tk_widget().destroy()
             self._bar_widget = None
 
-        room = self._room_var.get() if hasattr(self, "_room_var") else "All Rooms"
-        day  = self._day_var.get()  if hasattr(self, "_day_var")  else "All Days"
-        week = self._week_var.get() if hasattr(self, "_week_var") else "All Weeks"
+        room  = self._room_var.get()  if hasattr(self, "_room_var")  else "All Rooms"
+        day   = self._day_var.get()   if hasattr(self, "_day_var")   else "All Days"
+        month = self._month_var.get() if hasattr(self, "_month_var") else "All Months"
 
         params = []
         extra  = ""
@@ -367,12 +340,10 @@ class StudentDashboard(tk.Frame):
         if day != "All Days":
             extra += " AND DAYNAME(res.reservation_date) = %s"
             params.append(day)
-        if week != "All Weeks":
-            ws = self._get_week_start(week)
-            if ws:
-                we = (datetime.strptime(ws, "%Y-%m-%d") + timedelta(days=6)).strftime("%Y-%m-%d")
-                extra += " AND res.reservation_date BETWEEN %s AND %s"
-                params.extend([ws, we])
+        if month != "All Months":
+            month_num, year_num = self._parse_month(month)
+            extra += " AND MONTH(res.reservation_date) = %s AND YEAR(res.reservation_date) = %s"
+            params.extend([month_num, year_num])
 
         where_clause = (
             f"WHERE res.status IN ('reserved','checked_in','completed','no_show','cancelled'){extra}"
@@ -424,28 +395,24 @@ class StudentDashboard(tk.Frame):
         fc.get_tk_widget().pack(fill="both", expand=True)
         self._bar_widget = fc
 
-    # ------------------------------------------------------------------
-    # Chart 2 – Booking Pattern by Day of Week (bar)
-    # ------------------------------------------------------------------
+    # Shows this student's own bookings grouped by weekday to reveal usage habits.
     def _draw_line_chart(self):
         if self._line_widget:
             self._line_widget.get_tk_widget().destroy()
             self._line_widget = None
 
-        room = self._room_var.get() if hasattr(self, "_room_var") else "All Rooms"
-        week = self._week_var.get() if hasattr(self, "_week_var") else "All Weeks"
+        room  = self._room_var.get()  if hasattr(self, "_room_var")  else "All Rooms"
+        month = self._month_var.get() if hasattr(self, "_month_var") else "All Months"
 
         params = [self._uid]
         extra  = ""
         if room != "All Rooms":
             extra += " AND room_id = (SELECT room_id FROM Rooms WHERE room_number=%s)"
             params.append(room)
-        if week != "All Weeks":
-            ws = self._get_week_start(week)
-            if ws:
-                we = (datetime.strptime(ws, "%Y-%m-%d") + timedelta(days=6)).strftime("%Y-%m-%d")
-                extra += " AND reservation_date BETWEEN %s AND %s"
-                params.extend([ws, we])
+        if month != "All Months":
+            month_num, year_num = self._parse_month(month)
+            extra += " AND MONTH(reservation_date) = %s AND YEAR(reservation_date) = %s"
+            params.extend([month_num, year_num])
 
         try:
             rows = execute_query(
@@ -495,28 +462,25 @@ class StudentDashboard(tk.Frame):
         fc.get_tk_widget().pack(fill="both", expand=True)
         self._line_widget = fc
 
-    # ------------------------------------------------------------------
-    # Chart 3 – Room Booking Timeline (horizontal Gantt, room selected)
-    # ------------------------------------------------------------------
+    # Horizontal Gantt showing all bookings for the selected room so the student can see
+    # what times are typically occupied before making a new reservation.
     def _draw_timeline_chart(self, room_number):
         if self._timeline_widget:
             self._timeline_widget.get_tk_widget().destroy()
             self._timeline_widget = None
 
-        day  = self._day_var.get()  if hasattr(self, "_day_var")  else "All Days"
-        week = self._week_var.get() if hasattr(self, "_week_var") else "All Weeks"
+        day   = self._day_var.get()   if hasattr(self, "_day_var")   else "All Days"
+        month = self._month_var.get() if hasattr(self, "_month_var") else "All Months"
 
         params = [room_number]
         extra  = ""
         if day != "All Days":
             extra += " AND DAYNAME(res.reservation_date) = %s"
             params.append(day)
-        if week != "All Weeks":
-            ws = self._get_week_start(week)
-            if ws:
-                we = (datetime.strptime(ws, "%Y-%m-%d") + timedelta(days=6)).strftime("%Y-%m-%d")
-                extra += " AND res.reservation_date BETWEEN %s AND %s"
-                params.extend([ws, we])
+        if month != "All Months":
+            month_num, year_num = self._parse_month(month)
+            extra += " AND MONTH(res.reservation_date) = %s AND YEAR(res.reservation_date) = %s"
+            params.extend([month_num, year_num])
 
         try:
             rows = execute_query(
@@ -600,9 +564,7 @@ class StudentDashboard(tk.Frame):
         fc.get_tk_widget().pack(fill="both", expand=True)
         self._timeline_widget = fc
 
-    # ------------------------------------------------------------------
-    # Upcoming Reservations table
-    # ------------------------------------------------------------------
+    # Shows only the next 3 confirmed reservations so the widget stays compact.
     def _build_upcoming(self):
         uf = self._upcoming_frame
         for w in uf.winfo_children():
@@ -613,6 +575,7 @@ class StudentDashboard(tk.Frame):
                  ).grid(row=0, column=0, sticky="w", pady=(0, 8))
 
         try:
+            # Only 'reserved' status; checked_in and completed are already past their start time.
             rows = execute_query(
                 """SELECT res.reservation_id, r.room_number, r.room_category,
                           res.reservation_date, res.start_time, res.end_time, res.status

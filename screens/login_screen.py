@@ -1,3 +1,7 @@
+# Entry point for unauthenticated users.
+# Handles credential validation, suspended account blocking, and the
+# temporary-password gate that forces a reset before granting access.
+
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
@@ -13,6 +17,7 @@ WHITE  = "#FFFFFF"
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
 
+# SHA-256 matches the hashing used when passwords are stored during signup and reset.
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -26,7 +31,6 @@ class LoginScreen(tk.Frame):
         self._fail_count      = 0
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -111,7 +115,17 @@ class LoginScreen(tk.Frame):
                                    font=("Poppins", 13))
         email_entry.grid(row=3, column=0, sticky="ew", pady=(2, 10))
 
-        # Password with eye icon next to the field
+        # Pre-fill email after signup or password reset so the user does not have to retype it.
+        # prefill_email is set on the App instance by _handle_back_to_login before _show_login.
+        try:
+            root = self.winfo_toplevel()
+            if hasattr(root, "prefill_email") and root.prefill_email:
+                self.email_var.set(root.prefill_email)
+                root.prefill_email = None
+        except Exception:
+            pass
+
+        # Password field uses bullet masking by default; eye icon toggles visibility.
         tk.Label(right, text="Password",
                  fg=BLACK, bg=WHITE, font=("Poppins", 12, "bold")
                  ).grid(row=4, column=0, sticky="w")
@@ -181,13 +195,13 @@ class LoginScreen(tk.Frame):
             border_width=0,
             font=("Poppins", 14, "bold"),
             corner_radius=8, height=42, cursor="hand2",
-            command=self._show_forgot_popup
+            command=self.on_forgot
         ).grid(row=10, column=0, sticky="ew", pady=(8, 0))
 
         email_entry.bind("<Return>",     lambda e: self._do_login())
         self.pw_entry.bind("<Return>",   lambda e: self._do_login())
 
-    # ------------------------------------------------------------------
+    # Forces tkinter to measure and draw widgets so the eye icon can be placed precisely.
     def _refresh_eye_icons(self):
         try:
             for widget in self.winfo_children():
@@ -197,6 +211,7 @@ class LoginScreen(tk.Frame):
         except Exception:
             pass
 
+    # Gives the password entry focus so the cursor appears without requiring an extra click.
     def _force_render(self):
         try:
             self.pw_entry.focus_set()
@@ -204,15 +219,12 @@ class LoginScreen(tk.Frame):
         except Exception:
             pass
 
-    # ------------------------------------------------------------------
     def _toggle_password(self, event=None):
         self._pw_shown = not self._pw_shown
         self.pw_entry.configure(show="" if self._pw_shown else "•")
         self.eye_lbl.config(text=chr(128064) if self._pw_shown else chr(128065))
 
-    # ------------------------------------------------------------------
-    def _show_forgot_popup(self):
-        """Smooth 60fps animated lock-unlock popup before navigating to forgot password."""
+    # Animated lock-unlock popup runs before navigating to forgot password to signal the transition.
         popup = tk.Toplevel(self)
         popup.title("")
         popup.geometry("320x240")
@@ -341,7 +353,7 @@ class LoginScreen(tk.Frame):
 
         popup.after(16, tick)
 
-    # ------------------------------------------------------------------
+    # Shown after 3 consecutive failures to prompt the user toward password reset.
     def _show_lockout_popup(self):
         popup = tk.Toplevel(self)
         popup.title("Having trouble logging in?")
@@ -392,7 +404,7 @@ class LoginScreen(tk.Frame):
                   relief="flat", bd=0, padx=16, pady=8, cursor="hand2",
                   command=try_again).pack(side="left")
 
-    # ------------------------------------------------------------------
+    # Blocks navigation until the user changes the admin-issued temporary password.
     def _show_temp_password_popup(self, email: str):
         popup = tk.Toplevel(self)
         popup.title("Temporary Password Detected")
@@ -443,7 +455,6 @@ class LoginScreen(tk.Frame):
                       text_color=WHITE,
                       command=go_change).pack()
 
-    # ------------------------------------------------------------------
     def _do_login(self):
         identifier = self.email_var.get().strip()
         password   = self.pass_var.get().strip()
@@ -455,6 +466,7 @@ class LoginScreen(tk.Frame):
         hashed = _sha256(password)
 
         try:
+            # Accepts either email or numeric user_id so admins can log in by ID.
             rows = execute_query(
                 """SELECT user_id, first_name, last_name, role, account_status,
                           email, password_reset_required
@@ -470,6 +482,7 @@ class LoginScreen(tk.Frame):
 
         if not rows:
             self._fail_count += 1
+            # Every third consecutive failure surfaces the lockout popup instead of just an error.
             if self._fail_count % 3 == 0:
                 self._show_lockout_popup()
             else:
@@ -485,7 +498,7 @@ class LoginScreen(tk.Frame):
             )
             return
 
-        # Temporary password — force reset before allowing access
+        # password_reset_required is set by admin when issuing a temporary password.
         if user.get("password_reset_required"):
             self._show_temp_password_popup(user["email"])
             return

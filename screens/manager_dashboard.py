@@ -1,3 +1,7 @@
+# Admin overview dashboard with filterable stat cards and three embedded charts.
+# Filters are applied as a batch on Apply click rather than live so that expensive
+# queries only run when the manager is ready, not on every keystroke.
+
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
@@ -28,15 +32,12 @@ class ManagerDashboard(tk.Frame):
         self._listbox        = None
         self._chart_canvases = []
 
-        # Active filter state — updated only on Apply / Reset
+        # Snapshot of committed filter values; charts and cards read from here, not live widgets.
         self._active = {"uid": None, "type": "All", "from": None, "to": None}
 
         self._build()
         self.after(100, self._load_students)
 
-    # ------------------------------------------------------------------
-    # LAYOUT
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -86,9 +87,6 @@ class ManagerDashboard(tk.Frame):
     def _on_scroll(self, event):
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    # ------------------------------------------------------------------
-    # FILTER PANEL
-    # ------------------------------------------------------------------
     def _build_filter_panel(self):
         panel = tk.Frame(self._inner, bg=LGRAY, pady=6, padx=8)
         panel.grid(row=2, column=0, sticky="ew", padx=30, pady=(0, 5))
@@ -172,8 +170,6 @@ class ManagerDashboard(tk.Frame):
 
         self.bind_all("<Button-1>", self._on_global_click, "+")
 
-    # ---- Autocomplete ----
-
     def _load_students(self):
         try:
             rows = connect_db.execute_query(
@@ -200,15 +196,15 @@ class ManagerDashboard(tk.Frame):
         else:
             self._close_lb()
 
+    # Arrow button shows the full student list; second click closes it.
     def _toggle_all_students(self):
-        """Show all students on arrow click; close if already open."""
         if self._listbox_win:
             self._close_lb()
         else:
             self._show_lb(matches=list(self._all_students))
 
+    # Opens an undecorated Toplevel positioned below the entry field.
     def _show_lb(self, matches=None):
-        """Open dropdown listbox. Pass matches to override self._lb_matches."""
         self._close_lb()
         if matches is not None:
             self._lb_matches = matches
@@ -320,8 +316,6 @@ class ManagerDashboard(tk.Frame):
         except Exception:
             pass
 
-    # ---- Apply / Reset ----
-
     def _apply_filters(self):
         from_str = (self._from_date.get() or "").strip() or None
         to_str   = (self._to_date.get()   or "").strip() or None
@@ -343,9 +337,6 @@ class ManagerDashboard(tk.Frame):
         self._build_stat_cards()
         self._build_charts()
 
-    # ------------------------------------------------------------------
-    # STAT CARDS
-    # ------------------------------------------------------------------
     def _build_stat_cards(self):
         for w in self._cards_frame.winfo_children():
             w.destroy()
@@ -363,6 +354,7 @@ class ManagerDashboard(tk.Frame):
                      font=("Poppins", 11)
                      ).grid(row=1, column=0, padx=20, pady=(0, 10))
 
+    # Returns different labels and queries depending on whether a specific student is selected.
     def _fetch_stats(self):
         uid = self._active["uid"]
         try:
@@ -406,9 +398,6 @@ class ManagerDashboard(tk.Frame):
                 ["-", "-", "-"],
             )
 
-    # ------------------------------------------------------------------
-    # CHARTS
-    # ------------------------------------------------------------------
     def _build_charts(self):
         for cv in self._chart_canvases:
             try:
@@ -435,7 +424,6 @@ class ManagerDashboard(tk.Frame):
         f.grid(row=0, column=col, sticky="nsew", padx=6, pady=4)
         return f
 
-    # -- Chart 1: Room Usage (horizontal bar) --
     def _chart_room_usage(self, col, uid, from_val, to_val):
         frame = self._chart_border(col)
         rows  = []
@@ -453,7 +441,7 @@ class ManagerDashboard(tk.Frame):
             if from_val and to_val:
                 q += " AND res.reservation_date BETWEEN %s AND %s"
                 params.extend([from_val, to_val])
-            q += " GROUP BY r.room_id, r.room_number ORDER BY total DESC"
+            q += " GROUP BY r.room_id, r.room_number ORDER BY total ASC"
             rows = connect_db.execute_query(q, params or None, fetch=True) or []
         except Exception:
             pass
@@ -487,11 +475,12 @@ class ManagerDashboard(tk.Frame):
 
         self._embed_chart(fig, frame)
 
-    # -- Chart 2: Student Penalty Distribution (vertical bar) --
+    # Compares selected student vs class average when a student is chosen; shows distribution when not.
     def _chart_penalty_dist(self, col, uid):
-        frame = self._chart_border(col)
-        fig   = Figure(figsize=(5, 4))
-        ax    = fig.add_subplot(111)
+        frame   = self._chart_border(col)
+        fig     = Figure(figsize=(5, 4))
+        ax      = fig.add_subplot(111)
+        no_data = False
 
         try:
             if uid:
@@ -502,15 +491,19 @@ class ManagerDashboard(tk.Frame):
                     "SELECT AVG(penalty_points) AS avg_pts "
                     "FROM Users WHERE role='student'",
                     fetch=True)
-                sp = r_s[0]["penalty_points"] if r_s else 0
-                ap = round(float(r_a[0]["avg_pts"] or 0), 1) if r_a else 0.0
-
-                bars = ax.bar(["Selected Student", "Class Average"],
-                              [sp, ap], color=[MAROON, "#AAAAAA"])
-                for bar, v in zip(bars, [sp, ap]):
-                    ax.text(bar.get_x() + bar.get_width() / 2,
-                            bar.get_height() + 0.05,
-                            str(v), ha="center", fontsize=8)
+                if not r_s:
+                    no_data = True
+                else:
+                    sp = int(r_s[0]["penalty_points"] or 0)
+                    ap = round(float(r_a[0]["avg_pts"] or 0), 1) if r_a else 0.0
+                    bars = ax.bar(["Selected Student", "Class Average"],
+                                  [sp, ap], color=[MAROON, "#AAAAAA"])
+                    for bar, v in zip(bars, [sp, ap]):
+                        ax.text(bar.get_x() + bar.get_width() / 2,
+                                bar.get_height() + 0.3,
+                                str(v), ha="center", va="bottom", fontsize=9)
+                    if max(sp, ap) > 0:
+                        ax.set_ylim(0, max(sp, ap) * 1.15)
             else:
                 r = connect_db.execute_query(
                     "SELECT "
@@ -520,17 +513,25 @@ class ManagerDashboard(tk.Frame):
                     "  SUM(CASE WHEN penalty_points >= 10 THEN 1 ELSE 0 END) AS high "
                     "FROM Users WHERE role='student'",
                     fetch=True)
-                row = r[0] if r else {}
-                cats   = ["Clean\n(0pts)", "Low\n(1-5pts)", "Medium\n(6-9pts)", "High\n(10+pts)"]
-                counts = [row.get("clean") or 0, row.get("low") or 0,
-                          row.get("medium") or 0, row.get("high") or 0]
-                colors = ["#2ecc71", GOLD, "#e67e22", "#e74c3c"]
-                bars   = ax.bar(cats, counts, color=colors)
-                for bar, v in zip(bars, counts):
-                    ax.text(bar.get_x() + bar.get_width() / 2,
-                            bar.get_height() + 0.05,
-                            str(v), ha="center", fontsize=8)
+                if not r:
+                    no_data = True
+                else:
+                    row    = r[0]
+                    cats   = ["Clean\n(0pts)", "Low\n(1-5pts)", "Medium\n(6-9pts)", "High\n(10+pts)"]
+                    counts = [int(row.get("clean") or 0), int(row.get("low") or 0),
+                              int(row.get("medium") or 0), int(row.get("high") or 0)]
+                    colors = ["#2ecc71", GOLD, "#e67e22", "#e74c3c"]
+                    bars   = ax.bar(cats, counts, color=colors)
+                    for bar, v in zip(bars, counts):
+                        ax.text(bar.get_x() + bar.get_width() / 2,
+                                bar.get_height() + 0.3,
+                                str(v), ha="center", va="bottom", fontsize=9)
+                    if max(counts) > 0:
+                        ax.set_ylim(0, max(counts) * 1.15)
         except Exception:
+            no_data = True
+
+        if no_data:
             ax.text(0.5, 0.5, "No data", ha="center", va="center",
                     transform=ax.transAxes, fontsize=10, color="#888888")
 
@@ -541,11 +542,10 @@ class ManagerDashboard(tk.Frame):
 
         self._embed_chart(fig, frame)
 
-    # -- Chart 3: Violations Trend (line chart) --
     def _chart_violations_trend(self, col, uid, type_val, from_val, to_val):
         frame = self._chart_border(col)
 
-        # Default to last 6 months when no date filter is active
+        # Default to last 6 months so the chart is never empty on first load.
         if not (from_val and to_val):
             from_val = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
             to_val   = datetime.now().strftime("%Y-%m-%d")
@@ -577,11 +577,10 @@ class ManagerDashboard(tk.Frame):
         ax  = fig.add_subplot(111)
 
         if rows:
-            raw_months   = [r["month"] for r in rows]
-            no_shows     = [r["no_shows"]     for r in rows]
-            late_cancels = [r["late_cancels"] for r in rows]
+            raw_months   = [r["month"]       for r in rows]
+            no_shows     = [int(r["no_shows"]     or 0) for r in rows]
+            late_cancels = [int(r["late_cancels"] or 0) for r in rows]
 
-            # Format labels: "Jan 26", "Feb 26", etc.
             labels = []
             for m in raw_months:
                 try:
@@ -589,16 +588,56 @@ class ManagerDashboard(tk.Frame):
                 except Exception:
                     labels.append(m)
 
-            x_pos = range(len(labels))
-            ax.plot(list(x_pos), no_shows,     color=MAROON, marker="o",
-                    linewidth=1.5, label="No Shows")
-            ax.plot(list(x_pos), late_cancels, color=GOLD,   marker="o",
-                    linewidth=1.5, label="Late Cancels")
-            ax.set_xticks(list(x_pos))
+            x_pos     = list(range(len(labels)))
+            all_lines = []
+            all_data  = []
+
+            if type_val != "Late Cancel":
+                line1, = ax.plot(x_pos, no_shows, color=MAROON, marker="o",
+                                 linewidth=1.5, label="No Shows")
+                all_lines.append(line1)
+                all_data.append((x_pos, no_shows, "No Shows"))
+
+            if type_val != "No Show":
+                line2, = ax.plot(x_pos, late_cancels, color=GOLD, marker="o",
+                                 linewidth=1.5, label="Late Cancels")
+                all_lines.append(line2)
+                all_data.append((x_pos, late_cancels, "Late Cancels"))
+
+            ax.set_xticks(x_pos)
             ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
             ax.tick_params(axis="y", labelsize=8)
             ax.legend(fontsize=8)
             ax.grid(color="#E0E0E0", linestyle="--", linewidth=0.5)
+
+            # Hover tooltip
+            annot = ax.annotate(
+                "", xy=(0, 0), xytext=(10, 10), textcoords="offset points",
+                bbox=dict(boxstyle="round,pad=0.3", fc=MAROON, alpha=0.8),
+                arrowprops=dict(arrowstyle="->", color="white"),
+                color="white", fontsize=9)
+            annot.set_visible(False)
+
+            def on_hover(event):
+                if event.inaxes != ax:
+                    annot.set_visible(False)
+                    fig.canvas.draw_idle()
+                    return
+                for line, (xdata, ydata, label) in zip(all_lines, all_data):
+                    cont, ind = line.contains(event)
+                    if cont:
+                        idx   = ind["ind"][0]
+                        x_val = xdata[idx]
+                        y_val = ydata[idx]
+                        annot.xy = (x_val, y_val)
+                        annot.set_text(f"{label}\n{y_val}")
+                        annot.set_visible(True)
+                        fig.canvas.draw_idle()
+                        return
+                annot.set_visible(False)
+                fig.canvas.draw_idle()
+
+            fig.canvas.mpl_connect("motion_notify_event", on_hover)
         else:
             ax.text(0.5, 0.5, "No data", ha="center", va="center",
                     transform=ax.transAxes, fontsize=10, color="#888888")

@@ -1,3 +1,7 @@
+# App entry point: builds the single CTk window, manages auth vs. app layout swap,
+# and owns screen navigation. prefill_email passes the user's email between screens
+# so they never have to retype it after signup or password reset.
+
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
@@ -7,7 +11,6 @@ import webbrowser
 from datetime import datetime
 import credentials
 
-# ── Screens ────────────────────────────────────────────────────────────
 from screens.login_screen           import LoginScreen
 from screens.signup_screen          import SignupScreen
 from screens.forgot_password_screen import ForgotPasswordScreen
@@ -23,7 +26,6 @@ from screens.check_violations       import CheckViolations
 from screens.reports                import Reports
 from connect_db import execute_query
 
-# ── Theme ──────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
@@ -36,7 +38,6 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 MAPS_URL = "https://maps.google.com/?q=250+E+Preston+Mt+Pleasant+MI+48859"
 ADDRESS  = "250 E Preston\nMt Pleasant, MI 48859"
 
-# ── Nav definitions (label, screen_name) ──────────────────────────────
 STUDENT_NAV = [
     ("Dashboard",    "student_dashboard"),
     ("Browse Rooms", "browse_rooms"),
@@ -52,7 +53,6 @@ ADMIN_NAV = [
     ("Manage Rules","manage_rules_violations"),
 ]
 
-# ── Screen routing table ───────────────────────────────────────────────
 SCREEN_MAP = {
     "student_dashboard":       (StudentDashboard,       "Dashboard"),
     "browse_rooms":            (BrowseRooms,            "Browse Rooms"),
@@ -67,7 +67,6 @@ SCREEN_MAP = {
 }
 
 
-# ══════════════════════════════════════════════════════════════════════
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -84,6 +83,7 @@ class App(ctk.CTk):
         self._app_content   = None
         self._app_screen    = None
         self.nav_buttons    = {}
+        self.prefill_email  = None   # set before _show_login to pre-fill email field
 
         # StringVars for header user info — created once, updated on login
         self.user_id_var   = tk.StringVar()
@@ -96,16 +96,14 @@ class App(ctk.CTk):
         self._build_auth_container()
         self._show_login()
 
-    # ------------------------------------------------------------------
-    # Persistent auth container (built once, never destroyed)
-    # ------------------------------------------------------------------
+    # Auth container is built once and reused for all three auth screens so the
+    # CMU header never flickers when the user navigates between login/signup/forgot.
     def _build_auth_container(self):
         container = ctk.CTkFrame(self, fg_color=BLACK, corner_radius=0)
         container.columnconfigure(0, weight=1)
         container.rowconfigure(0, weight=0)   # header – fixed
         container.rowconfigure(1, weight=1)   # content – expands
 
-        # ── Persistent header ─────────────────────────────────────────
         header = tk.Frame(container, bg=BLACK, height=120)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)
@@ -135,7 +133,6 @@ class App(ctk.CTk):
                  fg=WHITE, bg=MAROON, font=("Poppins", 42, "bold"),
                  anchor="w", padx=20).pack(expand=True, fill="both")
 
-        # ── Swappable content area ────────────────────────────────────
         content = tk.Frame(container, bg=GOLD)
         content.grid(row=1, column=0, sticky="nsew")
         content.columnconfigure(0, weight=1)
@@ -148,17 +145,13 @@ class App(ctk.CTk):
         for w in self._auth_content.winfo_children():
             w.destroy()
 
-    # ------------------------------------------------------------------
-    # Persistent app layout (header + sidebar + content_frame)
-    # Built once per login; destroyed on logout.
-    # ------------------------------------------------------------------
+    # Built fresh on each login so role-specific nav is correct; torn down on logout.
     def _build_app_layout(self, role: str):
         container = tk.Frame(self, bg=WHITE)
         container.columnconfigure(0, weight=1)
         container.rowconfigure(0, weight=0)   # header row
         container.rowconfigure(1, weight=1)   # body row
 
-        # ── Persistent header (built inline, no AppHeader component) ──
         header = tk.Frame(container, bg=BLACK, height=120)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)
@@ -206,14 +199,12 @@ class App(ctk.CTk):
                  anchor="w", padx=20
                  ).grid(row=1, column=0, sticky="nsew")
 
-        # ── Body: sidebar + content ───────────────────────────────────
         body = tk.Frame(container, bg=WHITE)
         body.grid(row=1, column=0, sticky="nsew")
         body.columnconfigure(0, weight=0)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
 
-        # ── Persistent gold sidebar ───────────────────────────────────
         sidebar = tk.Frame(body, bg=GOLD, width=200)
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.pack_propagate(False)
@@ -221,7 +212,6 @@ class App(ctk.CTk):
         self.nav_buttons = {}
         self._build_sidebar(sidebar, role)
 
-        # ── Swappable content frame ───────────────────────────────────
         content_frame = tk.Frame(body, bg=WHITE)
         content_frame.grid(row=0, column=1, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
@@ -300,8 +290,8 @@ class App(ctk.CTk):
         addr_btn.bind("<Enter>", lambda e: addr_btn.config(fg=BLACK))
         addr_btn.bind("<Leave>", lambda e: addr_btn.config(fg=D_BDR))
 
+    # Destroys only the content area; header and sidebar stay in place.
     def _show_app_screen(self, screen_class, active_nav: str):
-        """Clear content_frame and build screen_class inside it."""
         for w in self._app_content.winfo_children():
             w.destroy()
         self._app_screen = screen_class(self._app_content, self.user_info, self._navigate)
@@ -309,8 +299,8 @@ class App(ctk.CTk):
         self._update_active_nav(active_nav)
         self._app_content.update_idletasks()
 
+    # Active button inverts to gold/maroon; all others revert to maroon/white.
     def _update_active_nav(self, active: str):
-        """Highlight the active sidebar button; restore all others."""
         D_BDR = "#3D0A0F"
         for name, btn in self.nav_buttons.items():
             if name == active:
@@ -320,9 +310,8 @@ class App(ctk.CTk):
                 btn.configure(fg_color=MAROON, text_color=WHITE,
                                border_color=D_BDR, hover_color="#7A1820")
 
-    # ------------------------------------------------------------------
-    # Navigation
-    # ------------------------------------------------------------------
+    # logout_to_forgot skips the login screen and goes directly to forgot-password
+    # so admins can issue temp passwords without cycling the student back through login.
     def _navigate(self, screen_name: str):
         if screen_name in ("logout", "logout_to_forgot"):
             self.user_info = {}
@@ -346,8 +335,8 @@ class App(ctk.CTk):
             screen_class, active_nav = SCREEN_MAP[screen_name]
             self._show_app_screen(screen_class, active_nav)
 
+    # grid_remove on auth_container preserves it so re-login doesn't need to rebuild it.
     def _swap(self, new_frame):
-        """Replace the currently visible top-level frame."""
         if self._current_frame and self._current_frame is not new_frame:
             if self._current_frame is self._auth_container:
                 self._current_frame.grid_remove()   # preserve, don't destroy
@@ -356,9 +345,6 @@ class App(ctk.CTk):
         self._current_frame = new_frame
         new_frame.grid(row=0, column=0, sticky="nsew")
 
-    # ------------------------------------------------------------------
-    # Auth screens – only content area changes; header stays static
-    # ------------------------------------------------------------------
     def _show_login(self):
         self._swap(self._auth_container)
         self._clear_auth_content()
@@ -374,7 +360,10 @@ class App(ctk.CTk):
     def _show_signup(self):
         self._swap(self._auth_container)
         self._clear_auth_content()
-        self._auth_screen = SignupScreen(self._auth_content, on_login=self._show_login)
+        self._auth_screen = SignupScreen(
+            self._auth_content,
+            on_login=lambda email="": self._handle_back_to_login(email)
+        )
         self._auth_screen.grid(row=0, column=0, sticky="nsew")
         self._auth_content.update_idletasks()
 
@@ -382,14 +371,19 @@ class App(ctk.CTk):
         self._swap(self._auth_container)
         self._clear_auth_content()
         self._auth_screen = ForgotPasswordScreen(
-            self._auth_content, on_login=self._show_login, **kwargs
+            self._auth_content,
+            on_login=lambda email="": self._handle_back_to_login(email),
+            **kwargs
         )
         self._auth_screen.grid(row=0, column=0, sticky="nsew")
         self._auth_content.update_idletasks()
 
-    # ------------------------------------------------------------------
-    # Login success – build persistent app layout then show dashboard
-    # ------------------------------------------------------------------
+    # Stores email on the App instance so LoginScreen can read it from self.master.prefill_email.
+    def _handle_back_to_login(self, email=""):
+        self.prefill_email = email or None
+        self._show_login()
+
+    # Builds the persistent app layout for the logged-in role, then shows the dashboard.
     def _on_login_success(self, user_info: dict):
         self.user_info = user_info
         # Update StringVars ONCE — labels use textvariable so they refresh instantly
@@ -405,27 +399,24 @@ class App(ctk.CTk):
             self._show_app_screen(StudentDashboard, "Dashboard")
         self._start_noshow_checker()
 
-    # ------------------------------------------------------------------
-    # No-show checker – runs immediately after login, then every 5 min
-    # ------------------------------------------------------------------
+    # First run fires immediately on login; after() reschedules on the main thread every 5 min.
     def _start_noshow_checker(self):
-        """Trigger first run immediately; after() keeps it on the main thread."""
         self._check_noshows()
 
+    # Marks overdue 'reserved' rows as no_show, creates violations, and suspends students
+    # who cross the threshold — all reads and writes within a single poll cycle.
     def _check_noshows(self):
         try:
             rows = execute_query(
-                """SELECT r.reservation_id, r.user_id, r.room_id,
-                          ru.points_no_show, ru.suspension_threshold_points,
-                          ru.suspension_duration_days
+                """SELECT r.reservation_id, r.user_id, r.reservation_date,
+                          r.start_time, r.rule_set_id,
+                          ru.checkin_grace_minutes, ru.points_no_show,
+                          ru.suspension_threshold_points, ru.suspension_duration_days
                    FROM Reservations r
-                   JOIN Rules ru ON ru.is_active = 1
-                   LEFT JOIN Check_Ins c ON c.reservation_id = r.reservation_id
+                   JOIN Rules ru ON ru.rule_set_id = r.rule_set_id
                    WHERE r.status = 'reserved'
-                     AND r.reservation_date = CURDATE()
-                     AND ADDTIME(r.start_time,
-                             SEC_TO_TIME(ru.checkin_grace_minutes * 60)) < CURTIME()
-                     AND c.checkin_id IS NULL""",
+                     AND CONCAT(r.reservation_date, ' ', r.start_time)
+                         + INTERVAL ru.checkin_grace_minutes MINUTE < NOW()""",
                 fetch=True
             )
             for row in rows:
@@ -471,7 +462,6 @@ class App(ctk.CTk):
             self.after(300_000, self._check_noshows)
 
 
-# ══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     app = App()
     app.mainloop()

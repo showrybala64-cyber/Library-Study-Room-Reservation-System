@@ -1,17 +1,20 @@
+# Read-only violations view for students.
+# Shows the student's own violation history with optional status and sort filters.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
-from datetime import date
 from connect_db import execute_query
-
-from components.date_picker import make_date_entry
 
 MAROON = "#5E1219"
 GOLD   = "#EFBF04"
 BLACK  = "#000000"
 WHITE  = "#FFFFFF"
 
-COLS = ("Violation ID", "Reservation", "Room", "Type", "Points", "Status", "Date")
+COLS = ("Vio ID", "Room", "Type", "Points", "Status", "Date")
+
+TYPE_MAP   = {"no_show": "No Show", "late_cancel": "Late Cancel"}
+STATUS_MAP = {"active": "Open", "resolved": "Resolved"}
 
 
 class ViolationsStudent(tk.Frame):
@@ -21,7 +24,6 @@ class ViolationsStudent(tk.Frame):
         self.navigator = navigator
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -30,7 +32,6 @@ class ViolationsStudent(tk.Frame):
         content.grid(row=0, column=0, sticky="nsew", padx=24, pady=16)
         content.columnconfigure(0, weight=1)
         content.rowconfigure(2, weight=1)
-        content.rowconfigure(4, weight=0)
 
         tk.Label(content, text="My Violations",
                  fg=MAROON, bg=WHITE, font=("Poppins", 22, "bold")
@@ -40,35 +41,29 @@ class ViolationsStudent(tk.Frame):
         ctrl_row = tk.Frame(content, bg=WHITE)
         ctrl_row.grid(row=1, column=0, sticky="w", pady=(10, 8))
 
-        tk.Label(ctrl_row, text="Filter by status:", fg=BLACK, bg=WHITE,
+        tk.Label(ctrl_row, text="Status:", fg=BLACK, bg=WHITE,
                  font=("Poppins", 12)).pack(side="left", padx=(0, 6))
         self.filter_var = tk.StringVar(value="All")
         ttk.Combobox(ctrl_row, textvariable=self.filter_var,
-                     values=["All", "open", "resolved", "appealed"],
+                     values=["All", "Open", "Resolved"],
                      state="readonly", width=12,
                      font=("Poppins", 12)
-                     ).pack(side="left", padx=(0, 10))
-
-        tk.Button(ctrl_row, text="Filter",
-                  fg=WHITE, bg=MAROON,
-                  font=("Poppins", 12, "bold"),
-                  relief="flat", bd=0, padx=14, pady=6, cursor="hand2",
-                  command=self._load_data
-                  ).pack(side="left", padx=(0, 8))
+                     ).pack(side="left", padx=(0, 14))
 
         tk.Label(ctrl_row, text="Sort by:", fg=BLACK, bg=WHITE,
-                 font=("Poppins", 12)).pack(side="left", padx=(8, 6))
+                 font=("Poppins", 12)).pack(side="left", padx=(0, 6))
         self.sort_var = tk.StringVar(value="Date")
         ttk.Combobox(ctrl_row, textvariable=self.sort_var,
-                     values=["Date", "Points", "Type"],
+                     values=["Date", "Points"],
                      state="readonly", width=10,
                      font=("Poppins", 12)
-                     ).pack(side="left", padx=(0, 8))
-        tk.Button(ctrl_row, text="Sort",
+                     ).pack(side="left", padx=(0, 14))
+
+        tk.Button(ctrl_row, text="Apply",
                   fg=WHITE, bg=MAROON,
                   font=("Poppins", 12, "bold"),
-                  relief="flat", bd=0, padx=14, pady=6, cursor="hand2",
-                  command=self._sort_data
+                  relief="flat", bd=0, padx=16, pady=6, cursor="hand2",
+                  command=self._load_data
                   ).pack(side="left")
 
         # Treeview
@@ -102,7 +97,7 @@ class ViolationsStudent(tk.Frame):
         self.tree.tag_configure("oddrow",  background="#FFF8E7")
         for col in COLS:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=110, anchor="center")
+            self.tree.column(col, width=120, anchor="center")
 
         vsb = ttk.Scrollbar(tree_border, orient="vertical",   command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_border, orient="horizontal", command=self.tree.xview)
@@ -111,104 +106,48 @@ class ViolationsStudent(tk.Frame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
-        # Generate report section
-        rpt_frame = tk.LabelFrame(content, text="Generate Report",
-                                  bg=WHITE, fg=MAROON,
-                                  font=("Poppins", 12, "bold"),
-                                  padx=12, pady=8)
-        rpt_frame.grid(row=3, column=0, sticky="ew", pady=(16, 0))
-
-        tk.Label(rpt_frame, text="From:", fg=BLACK, bg=WHITE,
-                 font=("Poppins", 12)).pack(side="left", padx=(0, 4))
-        self.from_entry = make_date_entry(rpt_frame, default_date="2025-01-01")
-        self.from_entry.pack(side="left", padx=(0, 12))
-
-        tk.Label(rpt_frame, text="To:", fg=BLACK, bg=WHITE,
-                 font=("Poppins", 12)).pack(side="left", padx=(0, 4))
-        today = date.today()
-        self.to_entry = make_date_entry(rpt_frame, default_date=today.strftime("%Y-%m-%d"))
-        self.to_entry.pack(side="left", padx=(0, 12))
-
-        tk.Button(rpt_frame, text="Generate",
-                  fg=WHITE, bg=MAROON,
-                  font=("Poppins", 12, "bold"),
-                  relief="flat", bd=0, padx=16, pady=6, cursor="hand2",
-                  command=self._generate_report
-                  ).pack(side="left")
-
         self._load_data()
 
-    # ------------------------------------------------------------------
     def _load_data(self):
         for row in self.tree.get_children():
             self.tree.delete(row)
-        try:
-            status_filter = self.filter_var.get()
-            params = [self.user_info["user_id"]]
-            extra  = ""
-            if status_filter != "All":
-                extra = " AND v.status = %s"
-                params.append(status_filter)
 
-            rows = execute_query(
-                f"""SELECT v.violation_id, v.reservation_id, rm.room_number,
-                           v.violation_type, v.points_assessed, v.status,
-                           DATE(v.created_at) AS vdate
-                    FROM Violations v
-                    JOIN Reservations r  ON v.reservation_id = r.reservation_id
-                    JOIN Rooms rm        ON r.room_id = rm.room_id
-                    WHERE v.user_id = %s{extra}
-                    ORDER BY v.created_at DESC""",
-                params, fetch=True
-            )
+        status_filter = self.filter_var.get()
+        sort_filter   = self.sort_var.get()
+
+        query = (
+            "SELECT v.violation_id, v.violation_type, v.points_assessed, "
+            "v.status, v.notes, v.created_at, v.resolved_at, "
+            "r.reservation_date, ro.room_number "
+            "FROM Violations v "
+            "JOIN Reservations r ON r.reservation_id = v.reservation_id "
+            "JOIN Rooms ro ON ro.room_id = r.room_id "
+            "WHERE v.user_id = %s"
+        )
+        params = [self.user_info["user_id"]]
+
+        if status_filter == "Open":
+            query += " AND v.status = 'active'"
+        elif status_filter == "Resolved":
+            query += " AND v.status = 'resolved'"
+
+        if sort_filter == "Points":
+            query += " ORDER BY v.points_assessed DESC"
+        else:
+            query += " ORDER BY v.created_at DESC"
+
+        try:
+            rows = execute_query(query, params, fetch=True)
             for i, row in enumerate(rows):
                 tag = "evenrow" if i % 2 == 0 else "oddrow"
                 self.tree.insert("", "end", values=(
-                    row["violation_id"], row["reservation_id"],
-                    row["room_number"],  row["violation_type"],
-                    row["points_assessed"], row["status"],
-                    str(row["vdate"]),
+                    row["violation_id"],
+                    row["room_number"],
+                    TYPE_MAP.get(row["violation_type"], row["violation_type"]),
+                    row["points_assessed"],
+                    STATUS_MAP.get(row["status"], row["status"]),
+                    str(row["created_at"])[:10],
                 ), tags=(tag,))
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))
 
-    def _sort_data(self):
-        sort_key = self.sort_var.get()
-        col_map  = {"Date": 6, "Points": 4, "Type": 3}
-        col_idx  = col_map.get(sort_key, 6)
-        data     = [(self.tree.set(k, COLS[col_idx]), k)
-                    for k in self.tree.get_children()]
-        data.sort()
-        for index, (_, k) in enumerate(data):
-            self.tree.move(k, "", index)
-
-    def _generate_report(self):
-        from_date = self.from_entry.get().strip()
-        to_date   = self.to_entry.get().strip()
-        try:
-            rows = execute_query(
-                """SELECT v.violation_id, v.violation_type, v.points_assessed,
-                          v.status, DATE(v.created_at) AS vdate
-                   FROM Violations v
-                   WHERE v.user_id = %s
-                     AND DATE(v.created_at) BETWEEN %s AND %s
-                   ORDER BY v.created_at""",
-                (self.user_info["user_id"], from_date, to_date), fetch=True
-            )
-            if not rows:
-                messagebox.showinfo("Report", "No violations found in the selected date range.")
-                return
-
-            total_pts = sum(r["points_assessed"] or 0 for r in rows)
-            lines = [f"Violations Report: {from_date} to {to_date}",
-                     f"Total violations: {len(rows)}",
-                     f"Total penalty points: {total_pts}",
-                     "─" * 40]
-            for r in rows:
-                lines.append(
-                    f"#{r['violation_id']}  {r['vdate']}  {r['violation_type']}  "
-                    f"+{r['points_assessed']}pts  [{r['status']}]"
-                )
-            messagebox.showinfo("Violation Report", "\n".join(lines))
-        except Exception as exc:
-            messagebox.showerror("Database Error", str(exc))

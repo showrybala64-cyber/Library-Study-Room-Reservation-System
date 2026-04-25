@@ -1,3 +1,7 @@
+# New account registration screen for students.
+# Restricted to @cmich.edu addresses; enforces password complexity before inserting the row.
+# On success, passes the registered email back to login so the field is pre-filled.
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 import customtkinter as ctk
@@ -14,6 +18,7 @@ WHITE  = "#FFFFFF"
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
 
+# SHA-256 must match the hashing used in login and password reset.
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -24,7 +29,6 @@ class SignupScreen(tk.Frame):
         self.on_login = on_login
         self._build()
 
-    # ------------------------------------------------------------------
     def _build(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -187,7 +191,7 @@ class SignupScreen(tk.Frame):
         self._match_lbl = tk.Label(right, text="", bg=WHITE, font=("Poppins", 10))
         self._match_lbl.grid(row=9, column=1, sticky="w", padx=(8, 0))
 
-        # Bind live update traces
+        # Update the checklist on every keystroke so feedback is immediate.
         self.vars["password"].trace_add("write", lambda *_: self._update_pw_checker())
         self.vars["confirm_password"].trace_add("write", lambda *_: self._update_pw_checker())
 
@@ -223,9 +227,8 @@ class SignupScreen(tk.Frame):
                 _bind_wheel(ch)
         _bind_wheel(right)
 
-    # ------------------------------------------------------------------
+    # Renders a labeled entry field; password fields get an eye-toggle icon placed via place().
     def _field(self, parent, row_i, col, label_text, key, is_password):
-        """Add a labeled form field (plain entry or password with eye icon)."""
         grid_row = row_i * 2 + 2
         px = (0, 8) if col == 0 else (8, 0)
 
@@ -272,7 +275,7 @@ class SignupScreen(tk.Frame):
                           ).grid(row=grid_row + 1, column=col, sticky="ew",
                                  padx=px, pady=(2, 10))
 
-    # ------------------------------------------------------------------
+    # Updates the live checklist labels as the user types; green check when a rule is satisfied.
     def _update_pw_checker(self):
         p = self.vars["password"].get()
         _RULE_TEXT = {
@@ -304,7 +307,7 @@ class SignupScreen(tk.Frame):
         else:
             self._match_lbl.config(text="\u2717 Passwords do not match", fg="#CC0000")
 
-    # ------------------------------------------------------------------
+    # Returns a list of unmet rules; empty list means the password is valid.
     @staticmethod
     def _validate_password(password):
         errors = []
@@ -327,6 +330,7 @@ class SignupScreen(tk.Frame):
             messagebox.showwarning("Sign Up", "Please fill in all required fields (*).")
             return
 
+        # Restrict registration to university accounts only.
         if not v["email"].lower().endswith("@cmich.edu"):
             messagebox.showerror("Sign Up", "Only @cmich.edu email addresses are allowed to register.")
             return
@@ -346,6 +350,7 @@ class SignupScreen(tk.Frame):
         hashed = _sha256(v["password"])
 
         try:
+            # Check for duplicate before inserting to surface a clear error instead of a DB constraint.
             exists = execute_query(
                 "SELECT user_id FROM Users WHERE email = %s",
                 (v["email"],), fetch=True
@@ -362,6 +367,7 @@ class SignupScreen(tk.Frame):
                  v["phone_number"] or None, hashed)
             )
             messagebox.showinfo("Sign Up", "Account created successfully! Please log in.")
-            self.on_login()
+            # Pass email so the login screen can pre-fill it without the user retyping.
+            self.on_login(v["email"])
         except Exception as exc:
             messagebox.showerror("Database Error", str(exc))

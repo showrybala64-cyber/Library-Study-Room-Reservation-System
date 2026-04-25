@@ -1,15 +1,15 @@
-# BIS 698 - University Library Room Reservation System
-# Central Michigan University
-# Database initialisation script — creates tables and adds missing columns.
-# Run once: python create_db.py
+# Database initialisation script.
+# Run once to create tables and add any columns that were added after initial deployment.
+# Safe to re-run: CREATE IF NOT EXISTS and duplicate-column guards prevent data loss.
+# Usage: python create_db.py
 
 import mysql.connector
 from mysql.connector import Error
 import credentials
 
-# ---------------------------------------------------------------------------
+# Each statement uses IF NOT EXISTS so re-running is idempotent.
 CREATE_STATEMENTS = [
-    # ── Users ───────────────────────────────────────────────────────────────
+    # Users: core account table; role determines which screens are accessible.
     """
     CREATE TABLE IF NOT EXISTS Users (
         user_id          INT           NOT NULL AUTO_INCREMENT,
@@ -32,7 +32,7 @@ CREATE_STATEMENTS = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
 
-    # ── Rooms ───────────────────────────────────────────────────────────────
+    # Rooms: physical study rooms available for reservation.
     """
     CREATE TABLE IF NOT EXISTS Rooms (
         room_id          INT           NOT NULL AUTO_INCREMENT,
@@ -48,7 +48,8 @@ CREATE_STATEMENTS = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
 
-    # ── Rules ───────────────────────────────────────────────────────────────
+    # Rules: configurable policy parameters (grace period, penalty points, suspension thresholds).
+    # Only the most recent active rule set is enforced by the no-show checker.
     """
     CREATE TABLE IF NOT EXISTS Rules (
         rule_set_id                INT     NOT NULL AUTO_INCREMENT,
@@ -69,7 +70,9 @@ CREATE_STATEMENTS = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
 
-    # ── Reservations ────────────────────────────────────────────────────────
+    # Reservations: each row is a single room booking by a student.
+    # rule_set_id links to the active policy at time of booking.
+    # FK ON DELETE CASCADE removes reservations when a user or room is deleted.
     """
     CREATE TABLE IF NOT EXISTS Reservations (
         reservation_id      INT      NOT NULL AUTO_INCREMENT,
@@ -94,7 +97,8 @@ CREATE_STATEMENTS = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
 
-    # ── Check_Ins ───────────────────────────────────────────────────────────
+    # Check_Ins: records the timestamp when a student physically checked in.
+    # A reservation without a Check_Ins row past the grace period becomes a no-show.
     """
     CREATE TABLE IF NOT EXISTS Check_Ins (
         checkin_id          INT      NOT NULL AUTO_INCREMENT,
@@ -110,7 +114,8 @@ CREATE_STATEMENTS = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
 
-    # ── Violations ──────────────────────────────────────────────────────────
+    # Violations: penalty events triggered by no-shows or late cancellations.
+    # points_assessed is copied from Rules at the time of the event, not recalculated.
     """
     CREATE TABLE IF NOT EXISTS Violations (
         violation_id        INT      NOT NULL AUTO_INCREMENT,
@@ -130,9 +135,8 @@ CREATE_STATEMENTS = [
     """,
 ]
 
-# ---------------------------------------------------------------------------
-# ALTER statements — safely add missing columns to existing tables
-# ---------------------------------------------------------------------------
+# ALTER statements add columns that were introduced after the initial schema.
+# Error 1060 (duplicate column) is silently skipped so this is safe to re-run.
 ALTER_STATEMENTS = [
     # Users
     ("Users", "phone_number",
@@ -190,9 +194,9 @@ ALTER_STATEMENTS = [
      "ALTER TABLE Violations ADD COLUMN resolved_by_user_id INT NULL AFTER resolved_at"),
 ]
 
-# ---------------------------------------------------------------------------
 
 def run():
+    # Connect with autocommit=True so each DDL statement commits immediately.
     conn   = None
     cursor = None
     try:
@@ -217,7 +221,7 @@ def run():
                 cursor.execute(sql)
                 print(f"  Added {table}.{col}")
             except mysql.connector.Error as e:
-                if e.errno == 1060:   # Duplicate column
+                if e.errno == 1060:   # duplicate column — already exists, skip
                     print(f"  Already exists: {table}.{col}")
                 else:
                     print(f"  ERROR on {table}.{col}: {e}")
