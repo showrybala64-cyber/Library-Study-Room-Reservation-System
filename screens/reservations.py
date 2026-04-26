@@ -180,8 +180,9 @@ class Reservations(tk.Frame):
                 return
 
             execute_query(
-                "INSERT INTO Check_Ins (reservation_id, checkin_time) VALUES (%s, NOW())",
-                (res_id,)
+                "INSERT INTO Check_Ins (reservation_id, user_id, checkin_time, method, recorded_by_user_id, created_at)"
+                " VALUES (%s, %s, NOW(), 'student_ui', NULL, NOW())",
+                (res_id, self.user_info["user_id"])
             )
             execute_query(
                 "UPDATE Reservations SET status = 'checked_in' WHERE reservation_id = %s",

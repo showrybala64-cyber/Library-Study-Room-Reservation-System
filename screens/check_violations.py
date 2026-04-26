@@ -123,14 +123,15 @@ class CheckViolations(tk.Frame):
             messagebox.showwarning("Edit Violation", "Please select a violation to edit.")
             return
 
-        vals    = self.tree.item(sel[0])["values"]
-        vio_id  = vals[0]
-        student = vals[2]
-        room    = vals[3]
-        vtype   = vals[4]
-        points  = vals[5]
-        status  = vals[6]
-        vdate   = vals[7]
+        vals       = self.tree.item(sel[0])["values"]
+        vio_id     = vals[0]
+        student_id = vals[1]
+        student    = vals[2]
+        room       = vals[3]
+        vtype      = vals[4]
+        points     = vals[5]
+        status     = vals[6]
+        vdate      = vals[7]
 
         # Fetch current notes from DB
         try:
@@ -229,6 +230,34 @@ class CheckViolations(tk.Frame):
                        WHERE violation_id=%s""",
                     (new_status, new_notes, new_status, vio_id)
                 )
+                if new_status == "resolved":
+                    execute_query(
+                        """UPDATE Users u
+                           SET u.penalty_points = (
+                               SELECT COALESCE(SUM(v.points_assessed), 0)
+                               FROM Violations v
+                               WHERE v.user_id = u.user_id AND v.status = 'active'
+                           )
+                           WHERE u.user_id = %s""",
+                        (student_id,)
+                    )
+                    threshold_rows = execute_query(
+                        "SELECT suspension_threshold_points FROM Rules WHERE is_active = 1",
+                        fetch=True
+                    )
+                    threshold = (int(threshold_rows[0]["suspension_threshold_points"])
+                                 if threshold_rows else 10)
+                    pts_rows = execute_query(
+                        "SELECT penalty_points FROM Users WHERE user_id = %s",
+                        (student_id,), fetch=True
+                    )
+                    new_pts = int(pts_rows[0]["penalty_points"] or 0) if pts_rows else 0
+                    if new_pts < threshold:
+                        execute_query(
+                            "UPDATE Users SET account_status = 'active', suspended_until = NULL"
+                            " WHERE user_id = %s AND account_status = 'suspended'",
+                            (student_id,)
+                        )
                 win.destroy()
                 messagebox.showinfo("Edit Violation", f"Violation #{vio_id} updated successfully.")
                 self._fetch(None, None)

@@ -174,7 +174,7 @@ class StudentDashboard(tk.Frame):
 
         try:
             r = execute_query(
-                "SELECT COUNT(*) as cnt FROM Violations WHERE user_id=%s",
+                "SELECT COUNT(*) as cnt FROM Violations WHERE user_id=%s AND status = 'active'",
                 (uid,), fetch=True
             )
             violations = int(r[0]["cnt"]) if r else 0
@@ -198,17 +198,26 @@ class StudentDashboard(tk.Frame):
 
         try:
             r = execute_query(
-                "SELECT penalty_points, account_status, suspended_until FROM Users WHERE user_id=%s",
+                "SELECT COALESCE(SUM(points_assessed), 0) as active_points"
+                " FROM Violations WHERE user_id=%s AND status = 'active'",
+                (uid,), fetch=True
+            )
+            pts = int(r[0]["active_points"] or 0) if r else 0
+        except Exception:
+            pts = 0
+
+        try:
+            r = execute_query(
+                "SELECT account_status, suspended_until FROM Users WHERE user_id=%s",
                 (uid,), fetch=True
             )
             if r:
-                pts             = int(r[0]["penalty_points"] or 0)
                 acct_status     = r[0]["account_status"]
                 suspended_until = r[0].get("suspended_until")
             else:
-                pts, acct_status, suspended_until = 0, "active", None
+                acct_status, suspended_until = "active", None
         except Exception:
-            pts, acct_status, suspended_until = 0, "active", None
+            acct_status, suspended_until = "active", None
 
         self._make_card(cf, 0, str(violations), "My Violations",    GOLD,   MAROON)
         self._make_card(cf, 1, str(visits),      "Visits This Week", GOLD,   MAROON)
@@ -226,6 +235,9 @@ class StudentDashboard(tk.Frame):
             c4_bg, c4_fg = RED,    WHITE
             c4_val        = "Suspended"
             c4_extra      = str(suspended_until)[:10] if suspended_until else ""
+        elif pts >= 10:
+            c4_bg, c4_fg = RED,    WHITE
+            c4_val, c4_extra = "Suspended", ""
         elif pts >= 5:
             c4_bg, c4_fg = ORANGE, WHITE
             c4_val, c4_extra = "Caution", ""
