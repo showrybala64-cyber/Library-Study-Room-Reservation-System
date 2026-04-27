@@ -230,7 +230,7 @@ class Reservations(tk.Frame):
                               COALESCE((SELECT points_late_cancel FROM Rules
                                         WHERE is_active = TRUE
                                         ORDER BY rule_set_id DESC LIMIT 1), 5),
-                              'open'
+                              'active'
                        FROM Reservations r WHERE r.reservation_id = %s""",
                     (res_id, res_id)
                 )

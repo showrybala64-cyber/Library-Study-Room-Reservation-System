@@ -18,7 +18,7 @@ BLACK  = "#000000"
 WHITE  = "#FFFFFF"
 LIGHT  = "#F8F8F8"
 
-TIME_SLOTS = [f"{h:02d}:{m:02d}" for h in range(7, 22) for m in (0, 30)]
+TIME_SLOTS = [f"{h:02d}:{m:02d}" for h in range(7, 24) for m in (0, 30)]
 
 CATEGORY_INFO = {
     "Projector Rooms": {

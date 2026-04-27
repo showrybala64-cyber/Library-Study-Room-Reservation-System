@@ -589,14 +589,14 @@ class StudentDashboard(tk.Frame):
         try:
             # Only 'reserved' status; checked_in and completed are already past their start time.
             rows = execute_query(
-                """SELECT res.reservation_id, r.room_number, r.room_category,
-                          res.reservation_date, res.start_time, res.end_time, res.status
-                   FROM Reservations res
-                   JOIN Rooms r ON r.room_id = res.room_id
-                   WHERE res.user_id = %s
-                   AND res.status = 'reserved'
-                   AND res.reservation_date >= CURDATE()
-                   ORDER BY res.reservation_date ASC, res.start_time ASC
+                """SELECT r.reservation_id, r.reservation_date, r.start_time,
+                          r.end_time, r.status, ro.room_number, ro.room_name,
+                          ro.room_category
+                   FROM Reservations r
+                   JOIN Rooms ro ON ro.room_id = r.room_id
+                   WHERE r.user_id = %s
+                   AND r.status = 'reserved'
+                   ORDER BY r.reservation_date ASC, r.start_time ASC
                    LIMIT 3""",
                 (self._uid,), fetch=True
             )

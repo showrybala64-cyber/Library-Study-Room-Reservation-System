@@ -8,7 +8,8 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 import os
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 import credentials
 
 from screens.login_screen           import LoginScreen
@@ -407,6 +408,9 @@ class App(ctk.CTk):
     # who cross the threshold — all reads and writes within a single poll cycle.
     def _check_noshows(self):
         try:
+            est = pytz.timezone("America/Detroit")
+            now_est = datetime.now(est).replace(tzinfo=None)
+
             rows = execute_query(
                 """SELECT r.reservation_id, r.user_id, r.reservation_date,
                           r.start_time, r.rule_set_id,
@@ -414,11 +418,16 @@ class App(ctk.CTk):
                           ru.suspension_threshold_points, ru.suspension_duration_days
                    FROM Reservations r
                    JOIN Rules ru ON ru.rule_set_id = r.rule_set_id
-                   WHERE r.status = 'reserved'
-                     AND CONCAT(r.reservation_date, ' ', r.start_time)
-                         + INTERVAL ru.checkin_grace_minutes MINUTE < NOW()""",
+                   WHERE r.status = 'reserved'""",
                 fetch=True
             )
+            rows = [
+                row for row in rows
+                if datetime.combine(
+                    row["reservation_date"],
+                    (datetime.min + row["start_time"]).time()
+                ) + timedelta(minutes=row["checkin_grace_minutes"]) < now_est
+            ]
             for row in rows:
                 res_id    = row["reservation_id"]
                 user_id   = row["user_id"]
