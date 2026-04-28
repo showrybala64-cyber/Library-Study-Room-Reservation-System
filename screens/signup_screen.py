@@ -248,8 +248,9 @@ class SignupScreen(tk.Frame):
             pw_ctk.grid(row=grid_row + 1, column=col, sticky="ew",
                         padx=px, pady=(2, 10))
 
-            eye = tk.Label(parent, text=chr(128065), cursor="hand2",
-                            bg=WHITE, fg=MAROON, font=("Poppins", 11))
+            setattr(self, f"_eye_{key}", tk.Label(parent, text=chr(128065), cursor="hand2",
+                                                   bg=WHITE, fg=MAROON, font=("Poppins", 11)))
+            eye = getattr(self, f"_eye_{key}")
 
             shown = [False]
             def _toggle(e=pw_ctk, lbl=eye, s=shown):

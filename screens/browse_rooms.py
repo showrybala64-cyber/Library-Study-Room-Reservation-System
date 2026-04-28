@@ -8,7 +8,7 @@ import customtkinter as ctk
 from datetime import date, datetime, timedelta
 import os
 import pytz
-from connect_db import execute_query
+from connect_db import execute_query, get_connection
 
 from components.date_picker import make_date_entry
 
@@ -267,6 +267,28 @@ class BrowseRooms(tk.Frame):
             messagebox.showerror("Database Error", str(exc))
 
     def _do_reserve(self):
+        # Re-check suspension from DB each time — catches users suspended mid-session.
+        try:
+            conn = get_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT account_status, suspended_until FROM Users WHERE user_id = %s",
+                (self.user_info["user_id"],)
+            )
+            status_check = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if status_check and status_check["account_status"] == "suspended":
+                suspended_until = status_check.get("suspended_until")
+                msg = "Your account is currently suspended."
+                if suspended_until:
+                    msg += f"\nSuspension ends: {suspended_until.strftime('%Y-%m-%d')}"
+                msg += "\nYou cannot make new reservations."
+                messagebox.showerror("Account Suspended", msg)
+                return
+        except Exception:
+            pass
+
         if not self.selected_cat:
             messagebox.showwarning("Reserve", "Please select a room category first.")
             return

@@ -8,8 +8,10 @@ import customtkinter as ctk
 from datetime import datetime, timedelta
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.ticker import MaxNLocator
 import connect_db
 from components.date_picker import make_date_entry
 
@@ -86,6 +88,11 @@ class ManagerDashboard(tk.Frame):
 
     def _on_scroll(self, event):
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _bind_scroll_recursive(self, widget):
+        widget.bind("<MouseWheel>", self._on_scroll)
+        for child in widget.winfo_children():
+            self._bind_scroll_recursive(child)
 
     def _build_filter_panel(self):
         panel = tk.Frame(self._inner, bg=LGRAY, pady=6, padx=8)
@@ -399,6 +406,7 @@ class ManagerDashboard(tk.Frame):
             )
 
     def _build_charts(self):
+        plt.close("all")
         for cv in self._chart_canvases:
             try:
                 cv.get_tk_widget().destroy()
@@ -417,6 +425,7 @@ class ManagerDashboard(tk.Frame):
         self._chart_room_usage(0, uid, from_val, to_val)
         self._chart_penalty_dist(1, uid)
         self._chart_violations_trend(2, uid, type_val, from_val, to_val)
+        self._bind_scroll_recursive(self._inner)
 
     def _chart_border(self, col):
         f = tk.Frame(self._charts_frame, bg=WHITE,
@@ -470,6 +479,7 @@ class ManagerDashboard(tk.Frame):
         ax.set_xlabel("Reservations", fontsize=9)
         ax.set_ylabel("Room", fontsize=9)
         ax.tick_params(axis="x", labelsize=8)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         fig.subplots_adjust(left=0.18)
         fig.tight_layout(pad=1.5)
 
@@ -538,6 +548,7 @@ class ManagerDashboard(tk.Frame):
         ax.set_title("Student Penalty Distribution", fontsize=10, color=MAROON, fontweight="bold")
         ax.set_ylabel("Students", fontsize=9)
         ax.tick_params(labelsize=8)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         fig.tight_layout(pad=1.5)
 
         self._embed_chart(fig, frame)
@@ -644,6 +655,7 @@ class ManagerDashboard(tk.Frame):
 
         ax.set_title("Violations by Month", fontsize=10, color=MAROON, fontweight="bold")
         ax.set_ylabel("Count", fontsize=9)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         fig.tight_layout(pad=1.5)
 
         self._embed_chart(fig, frame)

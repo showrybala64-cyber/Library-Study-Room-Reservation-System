@@ -46,6 +46,14 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
     _popup = [None]
 
     def open_calendar():
+        # FIX 4: destroy any previously tracked popup before opening a new one.
+        if hasattr(entry, '_calendar_popup'):
+            try:
+                if entry._calendar_popup.winfo_exists():
+                    entry._calendar_popup.destroy()
+            except Exception:
+                pass
+
         # Second click on the icon closes the popup rather than opening a second one.
         if _popup[0] is not None:
             try:
@@ -59,6 +67,23 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
         top.overrideredirect(True)
         top.attributes("-topmost", True)
         _popup[0] = top
+        entry._calendar_popup = top  # FIX 4: track so navigation-away can clean up.
+
+        # FIX 1: Close popup when any ancestor frame/screen is destroyed.
+        def on_parent_destroy(event=None):
+            try:
+                if top.winfo_exists():
+                    top.destroy()
+            except Exception:
+                pass
+
+        parent = entry.master
+        while parent and not isinstance(parent, (tk.Toplevel, tk.Tk)):
+            parent.bind('<Destroy>', on_parent_destroy, add='+')
+            parent = parent.master
+
+        # FIX 2: Close popup when it loses focus (user clicks elsewhere).
+        top.bind('<FocusOut>', lambda e: top.destroy() if top.winfo_exists() else None)
 
         # Position the popup directly below the entry field.
         entry.update_idletasks()
@@ -90,14 +115,27 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
             except Exception:
                 pass
 
+        # FIX 3: guard against destroyed entry widget and always clean up the popup.
         def on_select(_event=None):
-            entry.delete(0, "end")
-            entry.insert(0, cal.get_date())
             try:
-                top.destroy()
+                if not entry.winfo_exists():
+                    try:
+                        top.destroy()
+                    except Exception:
+                        pass
+                    return
+                entry.delete(0, "end")
+                entry.insert(0, cal.get_date())
+                try:
+                    top.destroy()
+                except Exception:
+                    pass
+                _popup[0] = None
             except Exception:
-                pass
-            _popup[0] = None
+                try:
+                    top.destroy()
+                except Exception:
+                    pass
 
         cal.bind("<<CalendarSelected>>", on_select)
 

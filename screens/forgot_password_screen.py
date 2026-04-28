@@ -253,8 +253,11 @@ class ForgotPasswordScreen(tk.Frame):
                                font=("Poppins", 13))
         pw_ctk.grid(row=grid_row, column=0, sticky="ew", padx=30, pady=(2, 0))
 
+        if not hasattr(self, "_eye_labels"):
+            self._eye_labels = []
         eye = tk.Label(parent, text=chr(128065), cursor="hand2",
-                        bg=WHITE, fg=MAROON, font=("Poppins", 11))
+                       bg=WHITE, fg=MAROON, font=("Poppins", 11))
+        self._eye_labels.append(eye)
 
         shown = [False]
         def _toggle(e=pw_ctk, lbl=eye, s=shown):

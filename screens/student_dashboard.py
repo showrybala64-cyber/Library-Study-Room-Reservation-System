@@ -8,6 +8,7 @@ from datetime import datetime
 
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.ticker import MaxNLocator
@@ -130,6 +131,7 @@ class StudentDashboard(tk.Frame):
     # Tears down old chart widgets and redraws with current filter state.
     # Destroying and recreating is simpler than trying to update figures in place.
     def _rebuild_charts(self):
+        plt.close("all")
         if self._charts_frame is not None:
             self._charts_frame.destroy()
         self._bar_widget      = None
@@ -367,7 +369,7 @@ class StudentDashboard(tk.Frame):
                     JOIN Rooms r ON r.room_id = res.room_id
                     {where_clause}
                     GROUP BY r.room_id, r.room_number
-                    ORDER BY bookings DESC""",
+                    ORDER BY bookings ASC""",
                 params if params else (), fetch=True
             )
         except Exception:

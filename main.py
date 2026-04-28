@@ -67,6 +67,14 @@ SCREEN_MAP = {
     "manage_rules_violations": (ManageRulesViolations,  "Manage Rules"),
 }
 
+ADMIN_SCREENS = {
+    "manager_dashboard",
+    "manage_rooms",
+    "manage_rules_violations",
+    "check_violations",
+    "reports",
+}
+
 
 class App(ctk.CTk):
     def __init__(self):
@@ -333,6 +341,13 @@ class App(ctk.CTk):
             return
 
         if screen_name in SCREEN_MAP:
+            if screen_name in ADMIN_SCREENS:
+                if not self.user_info or self.user_info.get("role") != "admin":
+                    messagebox.showerror(
+                        "Access Denied",
+                        "You do not have permission to access this screen."
+                    )
+                    return
             screen_class, active_nav = SCREEN_MAP[screen_name]
             self._show_app_screen(screen_class, active_nav)
 

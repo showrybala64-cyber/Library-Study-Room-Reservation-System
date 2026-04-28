@@ -334,6 +334,11 @@ class LoginScreen(tk.Frame):
             messagebox.showwarning("Login", "Please enter your email/ID and password.")
             return
 
+        if '@' in identifier and not identifier.lower().endswith('@cmich.edu'):
+            messagebox.showerror("Invalid Email",
+                                 "Please use your CMU email address (@cmich.edu).")
+            return
+
         hashed = _sha256(password)
 
         try:
