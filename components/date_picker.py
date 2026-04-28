@@ -82,9 +82,6 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
             parent.bind('<Destroy>', on_parent_destroy, add='+')
             parent = parent.master
 
-        # FIX 2: Close popup when it loses focus (user clicks elsewhere).
-        top.bind('<FocusOut>', lambda e: top.destroy() if top.winfo_exists() else None)
-
         # Position the popup directly below the entry field.
         entry.update_idletasks()
         x = entry.winfo_rootx()
@@ -115,8 +112,7 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
             except Exception:
                 pass
 
-        # FIX 3: guard against destroyed entry widget and always clean up the popup.
-        def on_select(_event=None):
+        def confirm_date():
             try:
                 if not entry.winfo_exists():
                     try:
@@ -124,8 +120,10 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
                     except Exception:
                         pass
                     return
+                selected_date = cal.selection_get()
+                formatted = selected_date.strftime("%Y-%m-%d")
                 entry.delete(0, "end")
-                entry.insert(0, cal.get_date())
+                entry.insert(0, formatted)
                 try:
                     top.destroy()
                 except Exception:
@@ -137,33 +135,37 @@ def make_date_entry(parent, default_date=None, entry_width=120, **kwargs):
                 except Exception:
                     pass
 
-        cal.bind("<<CalendarSelected>>", on_select)
-
-        tk.Button(
-            top, text="Select",
-            bg=MAROON, fg=WHITE,
-            font=("Poppins", 11, "bold"),
-            relief="flat", cursor="hand2",
-            command=on_select,
-        ).pack(fill="x", padx=5, pady=(0, 5))
-
-        # Bind to the root window so clicks anywhere outside the popup dismiss it.
-        def close_on_outside(event):
+        def cancel_calendar():
             try:
-                if top.winfo_exists():
-                    wx = top.winfo_rootx()
-                    wy = top.winfo_rooty()
-                    ww = top.winfo_width()
-                    wh = top.winfo_height()
-                    inside = (wx <= event.x_root <= wx + ww
-                              and wy <= event.y_root <= wy + wh)
-                    if not inside:
-                        top.destroy()
-                        _popup[0] = None
+                top.destroy()
             except Exception:
                 pass
+            _popup[0] = None
 
-        top.winfo_toplevel().bind("<Button-1>", close_on_outside, add="+")
+        btn_frame = tk.Frame(top, bg=WHITE)
+        btn_frame.pack(fill="x", padx=10, pady=(5, 10))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Confirm Date",
+            width=130, height=32,
+            fg_color="#5E1219",
+            hover_color="#7A1A23",
+            text_color="white",
+            font=("Poppins", 11, "bold"),
+            command=confirm_date,
+        ).pack(side="right", padx=(5, 0))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Cancel",
+            width=90, height=32,
+            fg_color="#888888",
+            hover_color="#666666",
+            text_color="white",
+            font=("Poppins", 11),
+            command=cancel_calendar,
+        ).pack(side="right")
 
     tk.Button(
         frame, text="📅",
